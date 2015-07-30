@@ -69,7 +69,7 @@ un.N <- scrUN(n = n, X = X, M = 200, niter = 25000, xlims = xlim, ylims = ylim,
       inits = list(lam0 = 0.1, sigma = rnorm(1, mean = 5, sd = 0.1)), updateY = FALSE,
       tune = c(0.004, 0.09, 0.35))
 
-coda.samples(un.N)
+# save(un.N, un.N.mcmc, file = "sc_model_results.RData")
 
 un.N.mcmc <- as.mcmc(un.N[[1]])
 plot(un.N.mcmc)
