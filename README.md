@@ -1,0 +1,1 @@
+Following the examples in Spatial capture-recapture book by Royle et al. (2014) I'm trying to evaluate the value of spatial count model against the capture-mark-recapture model. Former model assumes to use only count data (number of individuals) on "traps" while the latter model uses encounter history for each individual.
