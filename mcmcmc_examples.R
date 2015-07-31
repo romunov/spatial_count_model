@@ -9,7 +9,7 @@ LRMH <- function(formula, mu0, sigma0, theta, delta, niter, data) {
   
   for (i in 1:niter) {
     # this part should be generalized to accomodate more than one x, probably
-    # something along the lines of %*% and conting the number of explanatory
+    # something along the lines of %*% and counting the number of explanatory
     # variables
     theta.cand <- rnorm(1, mean = theta, sd = delta)
     z.cand <- theta.cand * x # specify linear predictor a la GLM
