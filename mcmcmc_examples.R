@@ -40,7 +40,7 @@ LRMH <- function(formula, mu0, sigma0, theta, delta, niter, data) {
 set.seed(357)
 x <- rnorm(100)
 z <- 5 * x
-theta <- 1/(1 + exp(-z))
+theta <- plogis(z) # theta <- 1/(1 + exp(-z))
 
 y <- rbinom(100, size = 1, prob = theta)
 
