@@ -12,8 +12,10 @@ LRMH <- function(formula, mu0, sigma0, theta, delta, niter, data) {
     # something along the lines of %*% and conting the number of explanatory
     # variables
     theta.cand <- rnorm(1, mean = theta, sd = delta)
+    z <- theta.cand * x # specify model
     
-    loglik.cand <- sum(dbinom(y, size = 1, prob = exp(theta.cand * x)/(1 + exp(theta.cand * x)), log = TRUE))
+    # calculate likelihoods and priors
+    loglik.cand <- sum(dbinom(y, size = 1, prob = exp(z)/(1 + exp(z)), log = TRUE))
     logprior.cand <- dnorm(theta.cand, mean = mu0, sd = sigma0, log = TRUE)
 
     loglik <- sum(dbinom(y, size = 1, prob = exp(theta * x)/(1 + exp(theta * x)), log = TRUE))
@@ -48,5 +50,5 @@ plot(sim.data)
 summary(glm(y ~ -1 + x, data = sim.data, family = binomial))
 
 # analyze using a MH algo
-mh.res <- LRMH(y ~ x, data = sim.data, mu0 = 3, sigma0 = 2, theta = 3, delta = 3, niter = 50000)
+mh.res <- LRMH(y ~ x, data = sim.data, mu0 = 0, sigma0 = 3, theta = 3, delta = 3, niter = 50000)
 hist(mh.res, xlab = "theta")
