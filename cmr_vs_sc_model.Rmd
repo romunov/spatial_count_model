@@ -69,8 +69,10 @@ yu <- max(X$y) + padding
 
 # run the model
 mark.N <- SCR0binom.cl(y = augmented.y, X = X, M = M, xl = xl, xu = xu, yl = yl, yu = yu, K = K, delta = c(0.1, 0.5, 5), niter = 25000)
+
 mark.N.mcmc <- mcmc(mark.N)
-plot(mark.N.mcmc)
+summary(window(mark.N.mcmc, start=6001))
+plot(window(mark.N.mcmc, start=6001))
 
 ### SC model
 # we sum the data for each trap across all individuals
@@ -79,17 +81,14 @@ n <- apply(y, MARGIN = c(2, 3), FUN = sum)
 dimnames(n) <- list(paste("trap", 1:J, sep = ""),
                     paste("occasion", 1:K, sep = ""))
 
-head(n)
-table(n)
-
 un.N <- scrUN(n = n, X = X, M = 200, niter = 25000, xlims = xlim, ylims = ylim,
       inits = list(lam0 = 0.1, sigma = rnorm(1, mean = 5, sd = 0.1)), updateY = FALSE,
       tune = c(0.004, 0.09, 0.35))
 
 
 un.N.mcmc <- as.mcmc(un.N[[1]])
-plot(un.N.mcmc)
-summary(un.N.mcmc)
+summary(window(un.N.mcmc, 1000))
+plot(window(un.N.mcmc, 1000))
 autocorr(un.N.mcmc)
 
 save(un.N, un.N.mcmc, n, y, X, augmented.y, mark.N, mark.N.mcmc, bin.y, M, file = "sc_model_results.RData")
