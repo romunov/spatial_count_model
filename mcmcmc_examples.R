@@ -12,13 +12,14 @@ LRMH <- function(formula, mu0, sigma0, theta, delta, niter, data) {
     # something along the lines of %*% and conting the number of explanatory
     # variables
     theta.cand <- rnorm(1, mean = theta, sd = delta)
-    z <- theta.cand * x # specify model
+    z.cand <- theta.cand * x # specify linear predictor a la GLM
+    z <- theta * x
     
     # calculate likelihoods and priors
-    loglik.cand <- sum(dbinom(y, size = 1, prob = exp(z)/(1 + exp(z)), log = TRUE))
+    loglik.cand <- sum(dbinom(y, size = 1, prob = exp(z.cand)/(1 + exp(z.cand)), log = TRUE))
     logprior.cand <- dnorm(theta.cand, mean = mu0, sd = sigma0, log = TRUE)
 
-    loglik <- sum(dbinom(y, size = 1, prob = exp(theta * x)/(1 + exp(theta * x)), log = TRUE))
+    loglik <- sum(dbinom(y, size = 1, prob = exp(z)/(1 + exp(z)), log = TRUE))
     logprior <- dnorm(theta, mean = mu0, sd = sigma0, log = TRUE)
     
     ratio <- exp((loglik.cand + logprior.cand) - (loglik + logprior))
