@@ -51,29 +51,56 @@ for (j in 1:J) {
     y[, j, k] <- rpois(N, lambda)
   }
 }
+```
 
+
+## Capture-mark-recapture model
+```{r prepare_data_scr}
 ### CMR model
-# augment data
-M <- 700
+# augment data - add M number of "phantom" individuals
+M <- 123
 # for each trap (J of them), record how many time an individual has been captured
 bin.y <- apply(y, MARGIN = 1:2, FUN = sum)
 augmented.y <- matrix(0, nrow = M, ncol = ncol(bin.y))
-augmented.y[1:nrow(augmented.y), ] <- augmented.y
+augmented.y[1:nrow(bin.y), ] <- bin.y
 
 # find outer bounds of the trapping grid and add padding
-padding <- 10
+padding <- 20
 xl <- min(X$x) - padding
 xu <- max(X$x) + padding
 yl <- min(X$y) - padding
 yu <- max(X$y) + padding
 
+start <- 1000
+```
+
+### SCR model with Poisson encounter process
+```{r}
+# See page
+mark.pois.N <- SCR0pois(y = augmented.y, X = X, M = M, xl = xl, xu = xu, yl = yl, yu = yu, delta = c(1, 0.1, 2), 
+                       niter = 6000)
+
+mark.pois.N.mcmc <- mcmc(mark.pois.N)
+plot(window(mark.pois.N.mcmc, start = start))
+summary(window(mark.pois.N.mcmc, start = start))
+```
+
+### Model with binomial encounter process
+```{r capture_mark_recapture_model}
 # run the model
-mark.N <- SCR0binom.cl(y = augmented.y, X = X, M = M, xl = xl, xu = xu, yl = yl, yu = yu, K = K, delta = c(0.1, 0.5, 5), niter = 25000)
+# TODO: ta model mogoče ne dela, ker imam za posamezno past več kot 1 ulov, model pa 
+# predpostavlja, da je osebek lahko zaznan samo enkrat v pasti (j) in časovnem intervalu (k)
+# za več poglej stran 455
+mark.N <- SCR0binom.cl(y = augmented.y, X = X, M = M, xl = xl, xu = xu, yl = yl, yu = yu, K = K, delta = c(1, 0.1, 2), 
+                       niter = 6000)
 
 mark.N.mcmc <- mcmc(mark.N)
-summary(window(mark.N.mcmc, start=6001))
-plot(window(mark.N.mcmc, start=6001))
+summary(window(mark.N.mcmc, start = start))
+plot(window(mark.N.mcmc, start = start))
+```
 
+## Spatial count model
+```{r spatial_count_model}
 ### SC model
 # we sum the data for each trap across all individuals
 n <- apply(y, MARGIN = c(2, 3), FUN = sum)
