@@ -5,9 +5,9 @@ date: "Thursday, July 30, 2015"
 output: html_document
 ---
 
-Estimating number of brown bears in Slovenia has been done using various methods. One common method is using capture-mark-recapture (CMR), where capture history of individuals is known. An alternative way is using a method termed "permanent count sites", where on, as you might have guessed it, permanent counting sites, hunters count number of bears using spatial count model (SC). Counting is done in special weather conditions and at night. I will dwell into efford needed for one and the other later.
+Estimating number of brown bears in Slovenia has been done using various methods. One common method is using capture-mark-recapture (CMR), where capture history of individuals is known. An alternative way is using a method termed "permanent count sites", where on, as you might have guessed it, permanent counting sites, hunters count number of bears. Counting is done in special weather conditions and at night. This kind of data could be analyzed using spatial count model. I will dwell into efford required for one or the other later.
 
-Let's first look how well can population size be estimated using both methods. Based on the code from Spatial capture-recapture by Royle et al. (2014) I will generate capture histories for individuals, use CMR method to estimate population size and then use a SC model on the collapsed capture histories of individuals. In other terms, I will use only the number of bears counted at a specific counting site.
+Let's first have a look at how well can population size be estimated using both methods. Based on the code from Spatial capture-recapture by Royle et al. (2014) I will attempt to generate capture histories for individuals and for my next trick, use CMR method to estimate population size and then use a SC model on the collapsed capture histories of individuals. In other terms, I will use only the number of bears counted at a specific counting site.
 
 ```{r setup}
 library(scrbook)
@@ -33,9 +33,9 @@ N <- rpois(1, mu * A)
 # we thus treat number of individuals as a Poisson random variable
 
 s <- cbind(
-  runif(N, min = xlim[1], max = xlim[2]),
-  runif(N, min = ylim[1], max = ylim[2])
-  )
+    runif(N, min = xlim[1], max = xlim[2]),
+    runif(N, min = ylim[1], max = ylim[2])
+)
 
 # generate encounter histories under the Poisson model
 sigma <- 5       # detection parameter
@@ -45,11 +45,11 @@ K <- 5           # number of trapping sessions
 y <- array(NA, c(N, J, K))
 
 for (j in 1:J) {
-  dist <- sqrt((X[j, 1] - s[, 1])^2 + (X[j, 2] - s[, 2])^2)
-  lambda <- lam0 * exp(-dist^2/(2 * sigma^2))
-  for (k in 1:K) {
-    y[, j, k] <- rpois(N, lambda)
-  }
+    dist <- sqrt((X[j, 1] - s[, 1])^2 + (X[j, 2] - s[, 2])^2)
+    lambda <- lam0 * exp(-dist^2/(2 * sigma^2))
+    for (k in 1:K) {
+        y[, j, k] <- rpois(N, lambda)
+    }
 }
 ```
 
@@ -71,32 +71,35 @@ xu <- max(X$x) + padding
 yl <- min(X$y) - padding
 yu <- max(X$y) + padding
 
-start <- 1000
+start <- 10000
 ```
 
 ### SCR model with Poisson encounter process
 ```{r}
-# See page
+set.seed(9)
 mark.pois.N <- SCR0pois(y = augmented.y, X = X, M = M, xl = xl, xu = xu, yl = yl, yu = yu, delta = c(1, 0.1, 2), 
-                       niter = 6000)
+                        niter = 100000)
 
 mark.pois.N.mcmc <- mcmc(mark.pois.N)
 plot(window(mark.pois.N.mcmc, start = start))
 summary(window(mark.pois.N.mcmc, start = start))
+save(mark.pois.N, file = "pois.N.RData")
 ```
 
 ### Model with binomial encounter process
+See page 455 of the book by Royle et al. (2014)
 ```{r capture_mark_recapture_model}
-# run the model
-# TODO: ta model mogoče ne dela, ker imam za posamezno past več kot 1 ulov, model pa 
-# predpostavlja, da je osebek lahko zaznan samo enkrat v pasti (j) in časovnem intervalu (k)
-# za več poglej stran 455
-mark.N <- SCR0binom.cl(y = augmented.y, X = X, M = M, xl = xl, xu = xu, yl = yl, yu = yu, K = K, delta = c(1, 0.1, 2), 
-                       niter = 6000)
+binom.augmented.y <- augmented.y
+binom.augmented.y[binom.augmented.y > 0] <- 1
 
-mark.N.mcmc <- mcmc(mark.N)
-summary(window(mark.N.mcmc, start = start))
-plot(window(mark.N.mcmc, start = start))
+set.seed(12)
+mark.binom.N <- SCR0binom.cl(y = binom.augmented.y, X = X, M = M, xl = xl, xu = xu, yl = yl, yu = yu, K = K, 
+                             delta = c(1, 0.1, 2), niter = 100000)
+
+mark.binom.N.mcmc <- mcmc(mark.binom.N)
+summary(window(mark.binom.N.mcmc, start = start))
+plot(window(mark.binom.N.mcmc, start = start))
+save(mark.binom.N, file = "binom.N.RData")
 ```
 
 ## Spatial count model
@@ -108,9 +111,9 @@ n <- apply(y, MARGIN = c(2, 3), FUN = sum)
 dimnames(n) <- list(paste("trap", 1:J, sep = ""),
                     paste("occasion", 1:K, sep = ""))
 
-un.N <- scrUN(n = n, X = X, M = 200, niter = 25000, xlims = xlim, ylims = ylim,
-      inits = list(lam0 = 0.1, sigma = rnorm(1, mean = 5, sd = 0.1)), updateY = FALSE,
-      tune = c(0.004, 0.09, 0.35))
+un.N <- scrUN(n = n, X = X, M = 200, niter = 100000, xlims = xlim, ylims = ylim,
+              inits = list(lam0 = 0.1, sigma = rnorm(1, mean = 5, sd = 0.1)), updateY = FALSE,
+              tune = c(0.004, 0.09, 0.35))
 
 
 un.N.mcmc <- as.mcmc(un.N[[1]])
@@ -118,9 +121,9 @@ summary(window(un.N.mcmc, 1000))
 plot(window(un.N.mcmc, 1000))
 autocorr(un.N.mcmc)
 
-save(un.N, un.N.mcmc, n, y, X, augmented.y, mark.N, mark.N.mcmc, bin.y, M, file = "sc_model_results.RData")
+save(un.N, file = "sc.RData")
 ```
 
 
-
+Začel ob 22:16
 
