@@ -159,7 +159,7 @@ ggplot(s, aes(x = model, y = q50)) +
 
 To my surprise, SCR bionimal/Poisson models appear to be quite biased compared to the SCR model for unmarked individuals that is plagued by large credible interval.
 
-
+# Parallel calculations
 ```{r parallel_analysis}
 # sum the data for each trap across all individuals for unmarked
 n <- apply(y, MARGIN = c(2, 3), FUN = sum)
