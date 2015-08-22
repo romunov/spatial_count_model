@@ -2,3 +2,5 @@ spatial_count_model.Rproj
 .Rproj.user
 *.Rproj
 *.RData
+*.md
+*.html
