@@ -13,6 +13,7 @@ Let's first have a look at how well can population size be estimated using both 
 library(scrbook)
 library(coda)
 library(ggplot2)
+library(parallel)
 ```
 
 ```{r simulate_data}
@@ -29,7 +30,7 @@ set.seed(1015)
 # A = area of S
 A <- (diff(xlim) * diff(ylim))/1e4
 
-mu <- 50
+mu <- 470
 N <- rpois(1, mu * A)
 # we thus treat number of individuals as a Poisson random variable
 
@@ -59,7 +60,7 @@ for (j in 1:J) {
 ```{r prepare_data_scr}
 ### CMR model
 # augment data - add M-nrow(y) of "phantom" individuals
-M <- 123
+M <- mu + 200
 # for each trap (J of them), record how many time an individual has been captured
 bin.y <- apply(y, MARGIN = 1:2, FUN = sum)
 augmented.y <- matrix(0, nrow = M, ncol = ncol(bin.y))
@@ -80,11 +81,12 @@ niter <- 25000
 See page 452 of the book by Royle et al. (2014)
 ```{r scr_poisson, eval = FALSE}
 set.seed(9)
+
 mark.pois.N <- SCR0pois(y = augmented.y, X = X, M = M, xl = xl, 
                         xu = xu, yl = yl, yu = yu, delta = c(1, 0.1, 2), 
                         niter = niter)
 
-save(mark.pois.N, file = "pois.N.RData")
+save(N.pois, file = "pois.N.RData")
 ```
 
 ```{r scr_poisson_results, fig.width = 5, fig.height = 8}
@@ -95,10 +97,10 @@ plot(window(mark.pois.N.mcmc, start = start))
 ```
 
 ### Model with binomial encounter process
-See page 455 of the book by Royle et al. (2014)
+See page 455 of the book by Royle et al. (2014). For this model it is assumed that individual `i` can be detected once per trap `j` and session `j`.
 ```{r scr_binom_model, eval = FALSE}
-binom.augmented.y <- augmented.y
-binom.augmented.y[binom.augmented.y > 0] <- 1
+# binom.augmented.y <- augmented.y
+# binom.augmented.y[binom.augmented.y > 0] <- 1
 
 set.seed(12)
 mark.binom.N <- SCR0binom.cl(y = binom.augmented.y, X = X, M = M, xl = xl,
@@ -117,7 +119,8 @@ plot(window(mark.binom.N.mcmc, start = start))
 
 ## Spatial count model (unmarked individuals)
 ```{r sc_model, eval = FALSE}
-# sum the data for each trap across all individuals
+# sum the data for each trap across all individuals where result
+# represents number of individuals caught for given trap and session [J × K]
 n <- apply(y, MARGIN = c(2, 3), FUN = sum)
 
 dimnames(n) <- list(paste("trap", 1:J, sep = ""),
@@ -140,9 +143,9 @@ plot(window(un.sc.mcmc, start = start))
 # Results
 ```{r present_results, fig.show = "hide", fig.width = 5, fig.height = 5}
 s <- data.frame(c("SCR_pois", "SCR_binom", "SCR_unmarked"),
-           rbind(s.scr.p$quantiles["N", ],
-                 s.scr.b$quantiles["N", ],
-                 s.sc$quantiles["N", ]))
+                rbind(s.scr.p$quantiles["N", ],
+                      s.scr.b$quantiles["N", ],
+                      s.sc$quantiles["N", ]))
 names(s) <- c("model", "q2.5", "q25", "q50", "q75", "q97.5")
 
 ggplot(s, aes(x = model, y = q50)) +
@@ -155,4 +158,42 @@ ggplot(s, aes(x = model, y = q50)) +
 ![Results of three models](./figure/present_results-1.png)
 
 To my surprise, SCR bionimal/Poisson models appear to be quite biased compared to the SCR model for unmarked individuals that is plagued by large credible interval.
+
+
+```{r parallel_analysis}
+# sum the data for each trap across all individuals for unmarked
+n <- apply(y, MARGIN = c(2, 3), FUN = sum)
+
+dimnames(n) <- list(paste("trap", 1:J, sep = ""),
+                    paste("occasion", 1:K, sep = ""))
+
+cs <- makeCluster(3)
+delta <- c(1, 0.1, 2)
+clusterExport(cl = cs, c("augmented.y", "M", "X", "xl", "xu", "yl", "yu", "delta", "niter", "SCR0pois", "n",
+                         "binom.augmented.y", "SCR0binom.cl", "scrUN", "xlim", "ylim"))
+
+sim <- parLapply(cl = cs, X = 1:3, 
+                    fun = function(null, augmented.y, binom.augmented.y, n, Xcoord, M, xl, xu, yl, yu, delta, niter,
+                                   xlim, ylim) {
+                        pois <- tryCatch(mark.pois.N <- SCR0pois(y = augmented.y, X = Xcoord, M = M, xl = xl, 
+                                                                 xu = xu, yl = yl, yu = yu, delta = delta, 
+                                                                 niter = niter), 
+                                         error = function(e) e)
+                        
+                        binom <- tryCatch(SCR0binom.cl(y = binom.augmented.y, X = Xcoord, M = M, xl = xl,
+                                                       xu = xu, yl = yl, yu = yu, K = K, 
+                                                       delta = c(1, 0.1, 2), niter = niter),
+                                          error = function(e) e)
+                        
+                        unmarked <- tryCatch(scrUN(n = n, X = Xcoord, M = M, niter = niter, xlims = xlim, ylims = ylim,
+                                                   inits = list(lam0 = 0.1, sigma = rnorm(1, mean = 5, sd = 0.1)), updateY = FALSE,
+                                                   tune = c(0.004, 0.09, 0.35)),
+                                             error = function(e) e)
+                        
+                        return(list(pois = pois, binom = binom, unmarked = unmarked))
+                    }, 
+                    augmented.y = augmented.y, binom.augmented.y = binom.augmented.y, n = n, Xcoord = X, M = M, xl = xl, 
+                    xu = xu, yl = yl, yu = yu, delta = c(1, 0.1, 2), xlim = xlim, ylim = ylim,
+                    niter = niter)
+```
 
