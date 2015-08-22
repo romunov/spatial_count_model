@@ -1,0 +1,77 @@
+---
+title: "SCR0 simulation example"
+author: "Roman Luštrik"
+date: "22. avgust 2015"
+output: html_document
+---
+
+On page 482 of the SCR book by Royle et al (2014) lies this example:
+```{r}
+library(scrbook)
+```
+
+```{r}
+tr <- seq(15, 85, length = 10)
+X <- cbind(rep(tr, each = length(tr)),
+           rep(tr, times = length(tr)))
+
+set.seed(10)
+
+xlim <- c(0, 100)
+ylim <- c(0, 100)
+
+A <- (xlim[2] - xlim[1]) * (ylim[2] - ylim[1])/1e4
+
+mu <- 50
+N <- rpois(1, mu * A)
+
+s <- cbind(runif(N, xlim[1], xlim[2]), runif(N, ylim[1], ylim[2]))
+
+sigma <- 5
+lam0 <- 0.4
+J <- nrow(X)
+K <- 5
+y <- array(NA, c(N, J, K))
+
+for (j in 1:J) {
+    dist <- sqrt((X[j, 1] - s[, 1])^2 + (X[j, 2] - s[, 2])^2)
+    lambda <- lam0 * exp(-dist^2/(2 * sigma^2))
+    for (k in 1:K) {
+        y[, j, k] <- rpois(N, lambda)
+    }
+}
+```
+
+### Unmarked individuals (spatial count)
+```{r}
+n <- apply(y, c(2, 3), FUN = sum)
+dimnames(n) <- list(paste("trap", 1:J, sep = " "),
+                    paste("night", 1:K, sep = ""))
+
+um.N <- scrUN(n = n, X = X, M = 300, niter = 25000, xlims = xlim, ylims = ylim,
+              inits = list(lam0 = 0.3, sigma = rnorm(1, 5, 0.1)),
+              updateY = FALSE, tune = c(0.004, 0.09, 0.35))
+```
+
+
+### SCR model (binomial encounter process)
+```{r}
+M <- 80
+padding <- 20
+xl <- min(X[, 1]) - padding
+xu <- max(X[, 1]) + padding
+yl <- min(X[, 2]) - padding
+yu <- max(X[, 2]) + padding
+
+plot(X, xlim = xlim + c(-padding, padding), ylim = ylim + c(-padding, padding))
+points(s, pch = "*")
+
+b <- apply(y, MARGIN = 1:2, FUN = sum)
+aug.b <- matrix(0, nrow = M, ncol = ncol(b))
+aug.b[1:nrow(b), ] <- b
+
+scr.b <- SCR0binom.cl(y = aug.b, X = X, M = M, xl = xl,
+             xu = xu, yl = yl, yu = yu, K = K, delta = c(0.1, 0.05, 2),
+             niter = 25000)
+```
+
