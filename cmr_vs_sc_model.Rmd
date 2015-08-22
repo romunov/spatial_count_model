@@ -173,27 +173,50 @@ clusterExport(cl = cs, c("augmented.y", "M", "X", "xl", "xu", "yl", "yu", "delta
                          "binom.augmented.y", "SCR0binom.cl", "scrUN", "xlim", "ylim"))
 
 sim <- parLapply(cl = cs, X = 1:3, 
-                    fun = function(null, augmented.y, binom.augmented.y, n, Xcoord, M, xl, xu, yl, yu, delta, niter,
-                                   xlim, ylim) {
-                        pois <- tryCatch(mark.pois.N <- SCR0pois(y = augmented.y, X = Xcoord, M = M, xl = xl, 
-                                                                 xu = xu, yl = yl, yu = yu, delta = delta, 
-                                                                 niter = niter), 
-                                         error = function(e) e)
-                        
-                        binom <- tryCatch(SCR0binom.cl(y = binom.augmented.y, X = Xcoord, M = M, xl = xl,
-                                                       xu = xu, yl = yl, yu = yu, K = K, 
-                                                       delta = c(1, 0.1, 2), niter = niter),
+                 fun = function(null, augmented.y, binom.augmented.y, n, Xcoord, M, xl, xu, yl, yu, delta, niter,
+                                xlim, ylim, K) {
+                     pois <- tryCatch(mark.pois.N <- SCR0pois(y = augmented.y, X = Xcoord, M = M, xl = xl, 
+                                                              xu = xu, yl = yl, yu = yu, delta = delta, 
+                                                              niter = niter), 
+                                      error = function(e) e)
+                     
+                     binom <- tryCatch(SCR0binom.cl(y = binom.augmented.y, X = Xcoord, M = M, xl = xl,
+                                                    xu = xu, yl = yl, yu = yu, K = K, 
+                                                    delta = c(1, 0.1, 2), niter = niter),
+                                       error = function(e) e)
+                     
+                     unmarked <- tryCatch(scrUN(n = n, X = Xcoord, M = M, niter = niter, xlims = xlim, ylims = ylim,
+                                                inits = list(lam0 = 0.1, sigma = rnorm(1, mean = 5, sd = 0.1)), updateY = FALSE,
+                                                tune = c(0.004, 0.09, 0.35)),
                                           error = function(e) e)
-                        
-                        unmarked <- tryCatch(scrUN(n = n, X = Xcoord, M = M, niter = niter, xlims = xlim, ylims = ylim,
-                                                   inits = list(lam0 = 0.1, sigma = rnorm(1, mean = 5, sd = 0.1)), updateY = FALSE,
-                                                   tune = c(0.004, 0.09, 0.35)),
-                                             error = function(e) e)
-                        
-                        return(list(pois = pois, binom = binom, unmarked = unmarked))
-                    }, 
-                    augmented.y = augmented.y, binom.augmented.y = binom.augmented.y, n = n, Xcoord = X, M = M, xl = xl, 
-                    xu = xu, yl = yl, yu = yu, delta = c(1, 0.1, 2), xlim = xlim, ylim = ylim,
-                    niter = niter)
+                     
+                     return(list(pois = pois, binom = binom, unmarked = unmarked))
+                 }, 
+                 augmented.y = augmented.y, binom.augmented.y = binom.augmented.y, n = n, Xcoord = X, M = M, xl = xl, 
+                 xu = xu, yl = yl, yu = yu, delta = c(1, 0.1, 2), xlim = xlim, ylim = ylim,
+                 niter = niter, K = K)
+```
+
+```{r paranalysis}
+# This function will extract N from summary() of MCMC chains
+# for each simulation run.
+getN <- function(x, mdl, start) {
+    # x is a list of simulation runs
+    # mdl is character vector either "pois", "binom" or "unmarked"
+    # get individual models
+    ind <- lapply(x, "[[", mdl) # extract pois model diagnostics
+    if (mdl == "unmarked") {
+        ind <- lapply(ind, "[[", "sims")
+    }
+    ind <- data.frame(model = mdl, 
+                      do.call("rbind", lapply(ind, FUN = function(y) {
+                          win <- summary(window(mcmc(y), start = start))
+                          win$quantiles["N", ]
+                      })),
+                      run = 1:length(ind))
+    ind
+}
+
+getN(x = sim, mdl = "binom", start = start)
 ```
 
