@@ -12,6 +12,7 @@ Let's first have a look at how well can population size be estimated using both 
 ```{r setup}
 library(scrbook)
 library(coda)
+library(ggplot2)
 ```
 
 ```{r simulate_data}
@@ -24,7 +25,7 @@ X <- expand.grid(x = tr, y = tr)
 xlim <- c(0, 100)
 ylim <- c(0, 100)
 
-set.seed(357)
+set.seed(1015)
 # A = area of S
 A <- (diff(xlim) * diff(ylim))/1e4
 
@@ -51,13 +52,13 @@ for (j in 1:J) {
         y[, j, k] <- rpois(N, lambda)
     }
 }
+
 ```
 
-
-## Capture-mark-recapture model
+## Capture-mark-recapture models
 ```{r prepare_data_scr}
 ### CMR model
-# augment data - add M number of "phantom" individuals
+# augment data - add M-nrow(y) of "phantom" individuals
 M <- 123
 # for each trap (J of them), record how many time an individual has been captured
 bin.y <- apply(y, MARGIN = 1:2, FUN = sum)
@@ -71,59 +72,86 @@ xu <- max(X$x) + padding
 yl <- min(X$y) - padding
 yu <- max(X$y) + padding
 
-start <- 10000
+start <- 5000
+niter <- 25000
 ```
 
 ### SCR model with Poisson encounter process
-```{r}
+See page 452 of the book by Royle et al. (2014)
+```{r scr_poisson, eval = FALSE}
 set.seed(9)
-mark.pois.N <- SCR0pois(y = augmented.y, X = X, M = M, xl = xl, xu = xu, yl = yl, yu = yu, delta = c(1, 0.1, 2), 
-                        niter = 100000)
+mark.pois.N <- SCR0pois(y = augmented.y, X = X, M = M, xl = xl, 
+                        xu = xu, yl = yl, yu = yu, delta = c(1, 0.1, 2), 
+                        niter = niter)
 
+save(mark.pois.N, file = "pois.N.RData")
+```
+
+```{r scr_poisson_results, fig.width = 5, fig.height = 8}
+load("pois.N.RData")
 mark.pois.N.mcmc <- mcmc(mark.pois.N)
 plot(window(mark.pois.N.mcmc, start = start))
-summary(window(mark.pois.N.mcmc, start = start))
-save(mark.pois.N, file = "pois.N.RData")
+(s.scr.p <- summary(window(mark.pois.N.mcmc, start = start)))
 ```
 
 ### Model with binomial encounter process
 See page 455 of the book by Royle et al. (2014)
-```{r capture_mark_recapture_model}
+```{r scr_binom_model, eval = FALSE}
 binom.augmented.y <- augmented.y
 binom.augmented.y[binom.augmented.y > 0] <- 1
 
 set.seed(12)
-mark.binom.N <- SCR0binom.cl(y = binom.augmented.y, X = X, M = M, xl = xl, xu = xu, yl = yl, yu = yu, K = K, 
-                             delta = c(1, 0.1, 2), niter = 100000)
+mark.binom.N <- SCR0binom.cl(y = binom.augmented.y, X = X, M = M, xl = xl,
+                             xu = xu, yl = yl, yu = yu, K = K, 
+                             delta = c(1, 0.1, 2), niter = niter)
 
-mark.binom.N.mcmc <- mcmc(mark.binom.N)
-summary(window(mark.binom.N.mcmc, start = start))
-plot(window(mark.binom.N.mcmc, start = start))
 save(mark.binom.N, file = "binom.N.RData")
 ```
 
+```{r cmr_model_results, fig.width = 5, fig.height = 8}
+load("binom.N.RData")
+mark.binom.N.mcmc <- mcmc(mark.binom.N)
+plot(window(mark.binom.N.mcmc, start = start))
+(s.scr.b <- summary(window(mark.binom.N.mcmc, start = start)))
+```
+
 ## Spatial count model
-```{r spatial_count_model}
-### SC model
-# we sum the data for each trap across all individuals
+```{r sc_model, eval = FALSE}
+# sum the data for each trap across all individuals
 n <- apply(y, MARGIN = c(2, 3), FUN = sum)
 
 dimnames(n) <- list(paste("trap", 1:J, sep = ""),
                     paste("occasion", 1:K, sep = ""))
 
-un.N <- scrUN(n = n, X = X, M = 200, niter = 100000, xlims = xlim, ylims = ylim,
+un.N <- scrUN(n = n, X = X, M = M, niter = niter, xlims = xlim, ylims = ylim,
               inits = list(lam0 = 0.1, sigma = rnorm(1, mean = 5, sd = 0.1)), updateY = FALSE,
               tune = c(0.004, 0.09, 0.35))
-
-
-un.N.mcmc <- as.mcmc(un.N[[1]])
-summary(window(un.N.mcmc, 1000))
-plot(window(un.N.mcmc, 1000))
-autocorr(un.N.mcmc)
 
 save(un.N, file = "sc.RData")
 ```
 
+```{r sc_model_results, fig.width = 5, fig.height = 8}
+load("sc.RData")
+un.sc.mcmc <- mcmc(un.N[[1]])
+plot(window(un.sc.mcmc, start = start))
+(s.sc <- summary(window(un.sc.mcmc)))
+```
 
-Začel ob 22:16
+# Results
+```{r present_results, fig.show = "hide", fig.width = 5, fig.height = 5}
+s <- data.frame(c("SCR_pois", "SCR_binom", "SC"),
+           rbind(s.scr.p$quantiles["N", ],
+                 s.scr.b$quantiles["N", ],
+                 s.sc$quantiles["N", ]))
+names(s) <- c("model", "q2.5", "q25", "q50", "q75", "q97.5")
+
+ggplot(s, aes(x = model, y = q50)) +
+    theme_bw() +
+    ylab("Estimated number of individuals") +
+    xlab("Model") +
+    geom_pointrange(aes(ymin = q2.5, ymax = q97.5), size = 1)
+```
+
+![Results of three models](./figure/present_results-1.png)
+
 
