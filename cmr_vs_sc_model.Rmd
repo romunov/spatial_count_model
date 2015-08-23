@@ -73,8 +73,8 @@ xu <- max(X$x) + padding
 yl <- min(X$y) - padding
 yu <- max(X$y) + padding
 
-start <- 5000
-niter <- 25000
+start <- 100
+niter <- 200
 ```
 
 ### SCR model with Poisson encounter process
@@ -99,8 +99,8 @@ plot(window(mark.pois.N.mcmc, start = start))
 ### Model with binomial encounter process
 See page 455 of the book by Royle et al. (2014). For this model it is assumed that individual `i` can be detected once per trap `j` and session `j`.
 ```{r scr_binom_model, eval = FALSE}
-# binom.augmented.y <- augmented.y
-# binom.augmented.y[binom.augmented.y > 0] <- 1
+binom.augmented.y <- augmented.y
+binom.augmented.y[binom.augmented.y > 0] <- 1
 
 set.seed(12)
 mark.binom.N <- SCR0binom.cl(y = binom.augmented.y, X = X, M = M, xl = xl,
@@ -161,41 +161,104 @@ To my surprise, SCR bionimal/Poisson models appear to be quite biased compared t
 
 # Parallel calculations
 ```{r parallel_analysis}
-# sum the data for each trap across all individuals for unmarked
-n <- apply(y, MARGIN = c(2, 3), FUN = sum)
-
-dimnames(n) <- list(paste("trap", 1:J, sep = ""),
-                    paste("occasion", 1:K, sep = ""))
+library(scrbook)
+library(coda)
+library(ggplot2)
+library(parallel)
 
 cs <- makeCluster(3)
-delta <- c(1, 0.1, 2)
-clusterExport(cl = cs, c("augmented.y", "M", "X", "xl", "xu", "yl", "yu", "delta", "niter", "SCR0pois", "n",
-                         "binom.augmented.y", "SCR0binom.cl", "scrUN", "xlim", "ylim"))
-
-sim <- parLapply(cl = cs, X = 1:3, 
-                 fun = function(null, augmented.y, binom.augmented.y, n, Xcoord, M, xl, xu, yl, yu, delta, niter,
-                                xlim, ylim, K) {
-                     pois <- tryCatch(mark.pois.N <- SCR0pois(y = augmented.y, X = Xcoord, M = M, xl = xl, 
-                                                              xu = xu, yl = yl, yu = yu, delta = delta, 
-                                                              niter = niter), 
-                                      error = function(e) e)
-                     
-                     binom <- tryCatch(SCR0binom.cl(y = binom.augmented.y, X = Xcoord, M = M, xl = xl,
-                                                    xu = xu, yl = yl, yu = yu, K = K, 
-                                                    delta = c(1, 0.1, 2), niter = niter),
-                                       error = function(e) e)
-                     
-                     unmarked <- tryCatch(scrUN(n = n, X = Xcoord, M = M, niter = niter, xlims = xlim, ylims = ylim,
-                                                inits = list(lam0 = 0.1, sigma = rnorm(1, mean = 5, sd = 0.1)), updateY = FALSE,
-                                                tune = c(0.004, 0.09, 0.35)),
-                                          error = function(e) e)
-                     
-                     return(list(pois = pois, binom = binom, unmarked = unmarked))
-                 }, 
-                 augmented.y = augmented.y, binom.augmented.y = binom.augmented.y, n = n, Xcoord = X, M = M, xl = xl, 
-                 xu = xu, yl = yl, yu = yu, delta = c(1, 0.1, 2), xlim = xlim, ylim = ylim,
-                 niter = niter, K = K)
+clusterExport(cl = cs, varlist = c("SCR0pois", "SCR0binom.cl", "scrUN"))
 ```
+
+```{r}
+sim <- parLapplyLB(cl = cs, X = 1:30, fun = function(x) {
+# sim <- lapply(X = 1, FUN = function(x) {
+    pb <- txtProgressBar(min = 0, max = 30, width = 30, style = 3)
+    setTxtProgressBar(pb = pb, value = x)
+    
+    tr <- seq(15, 85, length = 10)
+    
+    # create trap grid
+    X <- expand.grid(x = tr, y = tr)
+    
+    # S
+    xlim <- c(0, 100)
+    ylim <- c(0, 100)
+    
+    # A = area of S
+    A <- (diff(xlim) * diff(ylim))/1e4
+    
+    mu <- 500
+    # we thus treat number of individuals as a Poisson random variable
+    N <- rpois(1, mu * A)
+    
+    s <- cbind(
+        runif(N, min = xlim[1], max = xlim[2]),
+        runif(N, min = ylim[1], max = ylim[2])
+    )
+    
+    # generate encounter histories under the Poisson model
+    sigma <- 5       # detection parameter
+    lam0 <- 0.4      # base detection
+    J <- nrow(X)     # number of traps
+    K <- 5           # number of trapping sessions
+    y <- array(NA, c(N, J, K))
+    
+    for (j in 1:J) {
+        dist <- sqrt((X[j, 1] - s[, 1])^2 + (X[j, 2] - s[, 2])^2)
+        lambda <- lam0 * exp(-dist^2/(2 * sigma^2))
+        for (k in 1:K) {
+            y[, j, k] <- rpois(N, lambda)
+        }
+    }
+    
+    ### CMR model
+    # augment data - add M-nrow(y) of "phantom" individuals
+    M <- mu * 1.5
+    # for each trap (J of them), record how many time an individual has been captured
+    bin.y <- apply(y, MARGIN = 1:2, FUN = sum)
+    augmented.y <- matrix(0, nrow = M, ncol = ncol(bin.y))
+    augmented.y[1:nrow(bin.y), ] <- bin.y
+    
+    binom.augmented.y <- augmented.y
+    binom.augmented.y[binom.augmented.y > 0] <- 1
+    
+    # find outer bounds of the trapping grid and add padding
+    padding <- 20
+    xl <- min(X$x) - padding
+    xu <- max(X$x) + padding
+    yl <- min(X$y) - padding
+    yu <- max(X$y) + padding
+    
+    start <- 5000
+    niter <- 25000
+    
+    # sum the data for each trap across all individuals where result
+    # represents number of individuals caught for given trap and session [J × K]
+    n <- apply(y, MARGIN = c(2, 3), FUN = sum)
+    
+    dimnames(n) <- list(paste("trap", 1:J, sep = ""),
+                        paste("occasion", 1:K, sep = ""))
+    
+    pois <- tryCatch(mark.pois.N <- SCR0pois(y = augmented.y, X = X, M = M, xl = xl, 
+                                             xu = xu, yl = yl, yu = yu, delta = c(1, 0.1, 2), 
+                                             niter = niter), 
+                     error = function(e) e)
+    
+    binom <- tryCatch(SCR0binom.cl(y = binom.augmented.y, X = X, M = M, xl = xl,
+                                   xu = xu, yl = yl, yu = yu, K = K, 
+                                   delta = c(1, 0.1, 2), niter = niter),
+                      error = function(e) e)
+    
+    unmarked <- tryCatch(scrUN(n = n, X = X, M = M, niter = niter, xlims = xlim, ylims = ylim,
+                               inits = list(lam0 = 0.1, sigma = rnorm(1, mean = 5, sd = 0.1)), updateY = FALSE,
+                               tune = c(0.004, 0.09, 0.35)),
+                         error = function(e) e)
+    
+    return(list(pois = pois, binom = binom, unmarked = unmarked))
+})
+```
+
 
 ```{r paranalysis}
 # This function will extract N from summary() of MCMC chains
