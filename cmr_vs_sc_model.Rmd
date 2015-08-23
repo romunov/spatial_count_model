@@ -171,10 +171,16 @@ clusterExport(cl = cs, varlist = c("SCR0pois", "SCR0binom.cl", "scrUN"))
 ```
 
 ```{r}
+
+if (file.exists("progress.txt")) {
+    file.remove("progress.txt")
+}
 sim <- parLapplyLB(cl = cs, X = 1:30, fun = function(x) {
 # sim <- lapply(X = 1, FUN = function(x) {
-    pb <- txtProgressBar(min = 0, max = 30, width = 30, style = 3)
-    setTxtProgressBar(pb = pb, value = x)
+#     pb <- txtProgressBar(min = 0, max = 30, width = 30, style = 3)
+#     setTxtProgressBar(pb = pb, value = x)
+    
+    write(x, file = "progress.txt", append = TRUE, sep = "\n") #logging
     
     tr <- seq(15, 85, length = 10)
     
