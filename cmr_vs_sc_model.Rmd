@@ -160,7 +160,7 @@ ggplot(s, aes(x = model, y = q50)) +
 To my surprise, SCR bionimal/Poisson models appear to be quite biased compared to the SCR model for unmarked individuals that is plagued by large credible interval.
 
 # Parallel calculations
-```{r parallel_analysis}
+```{r parallel_setup}
 library(scrbook)
 library(coda)
 library(ggplot2)
@@ -170,12 +170,11 @@ cs <- makeCluster(3)
 clusterExport(cl = cs, varlist = c("SCR0pois", "SCR0binom.cl", "scrUN"))
 ```
 
-```{r}
-
+```{r parallel_simulation}
 if (file.exists("progress.txt")) {
   file.remove("progress.txt")
 }
-sim <- parLapplyLB(cl = cs, X = 1:30, fun = function(x) {
+sim <- parLapplyLB(cl = cs, X = 1:3, fun = function(x) {
   # sim <- lapply(X = 1, FUN = function(x) {
   #     pb <- txtProgressBar(min = 0, max = 30, width = 30, style = 3)
   #     setTxtProgressBar(pb = pb, value = x)
@@ -219,9 +218,9 @@ sim <- parLapplyLB(cl = cs, X = 1:30, fun = function(x) {
   }
   
   ### CMR model
-  # augment data - add M-nrow(y) of "phantom" individuals
+  # augment data - add 50% of "phantom" individuals
   M <- mu * 1.5
-  # for each trap (J of them), record how many time an individual has been captured
+  # for each trap (J of them), record how many times an individual has been captured
   bin.y <- apply(y, MARGIN = 1:2, FUN = sum)
   augmented.y <- matrix(0, nrow = M, ncol = ncol(bin.y))
   augmented.y[1:nrow(bin.y), ] <- bin.y
@@ -236,8 +235,8 @@ sim <- parLapplyLB(cl = cs, X = 1:30, fun = function(x) {
   yl <- min(X$y) - padding
   yu <- max(X$y) + padding
   
-  start <- 5000
-  niter <- 25000
+  start <- 1000
+  niter <- 2000
   
   # sum the data for each trap across all individuals where result
   # represents number of individuals caught for given trap and session [J × K]
