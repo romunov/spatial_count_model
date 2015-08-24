@@ -174,12 +174,13 @@ clusterExport(cl = cs, varlist = c("SCR0pois", "SCR0binom.cl", "scrUN"))
 if (file.exists("progress.txt")) {
   file.remove("progress.txt")
 }
-sim <- parLapplyLB(cl = cs, X = 1:3, fun = function(x) {
+
+sim <- parLapplyLB(cl = cs, X = 1:6, fun = function(x) {
   # sim <- lapply(X = 1, FUN = function(x) {
   #     pb <- txtProgressBar(min = 0, max = 30, width = 30, style = 3)
   #     setTxtProgressBar(pb = pb, value = x)
   
-  write(x, file = "progress.txt", append = TRUE, sep = "\n") #logging
+  start.time <- Sys.time()
   
   tr <- seq(15, 85, length = 10)
   
@@ -229,14 +230,17 @@ sim <- parLapplyLB(cl = cs, X = 1:3, fun = function(x) {
   binom.augmented.y[binom.augmented.y > 0] <- 1
   
   # find outer bounds of the trapping grid and add padding
-  padding <- 20
+  # Jose J G-H pointed out that padding <- 20 may too much since padding
+  # is actually 15+padding. Alternatively I could simulate space-state so
+  # that xlim and ylim would include the buffer given sigma.
+  padding <- 5
   xl <- min(X$x) - padding
   xu <- max(X$x) + padding
   yl <- min(X$y) - padding
   yu <- max(X$y) + padding
   
-  start <- 1000
-  niter <- 2000
+  start <- 3000
+  niter <- 10000
   
   # sum the data for each trap across all individuals where result
   # represents number of individuals caught for given trap and session [J × K]
@@ -290,7 +294,13 @@ sim <- parLapplyLB(cl = cs, X = 1:3, fun = function(x) {
     }
   }
   
-  return(list(pois = pois, binom = binom, unmarked = unmarked))
+  # this logs runs
+  timediff <- Sys.time() - start.time
+  unit <- attr(timediff, "units")
+  log.string <- sprintf("Iteration %d lasted %3.1f %s", x, timediff, unit)
+  write(log.string, file = "progress.txt", append = TRUE, sep = "\n")
+  
+  return(list(pois = pois, binom = binom, unmarked = unmarked, run = x))
 })
 ```
 
