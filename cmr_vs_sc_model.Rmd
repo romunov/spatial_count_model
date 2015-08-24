@@ -35,8 +35,8 @@ N <- rpois(1, mu * A)
 # we thus treat number of individuals as a Poisson random variable
 
 s <- cbind(
-    runif(N, min = xlim[1], max = xlim[2]),
-    runif(N, min = ylim[1], max = ylim[2])
+  runif(N, min = xlim[1], max = xlim[2]),
+  runif(N, min = ylim[1], max = ylim[2])
 )
 
 # generate encounter histories under the Poisson model
@@ -47,11 +47,11 @@ K <- 5           # number of trapping sessions
 y <- array(NA, c(N, J, K))
 
 for (j in 1:J) {
-    dist <- sqrt((X[j, 1] - s[, 1])^2 + (X[j, 2] - s[, 2])^2)
-    lambda <- lam0 * exp(-dist^2/(2 * sigma^2))
-    for (k in 1:K) {
-        y[, j, k] <- rpois(N, lambda)
-    }
+  dist <- sqrt((X[j, 1] - s[, 1])^2 + (X[j, 2] - s[, 2])^2)
+  lambda <- lam0 * exp(-dist^2/(2 * sigma^2))
+  for (k in 1:K) {
+    y[, j, k] <- rpois(N, lambda)
+  }
 }
 
 ```
@@ -149,10 +149,10 @@ s <- data.frame(c("SCR_pois", "SCR_binom", "SCR_unmarked"),
 names(s) <- c("model", "q2.5", "q25", "q50", "q75", "q97.5")
 
 ggplot(s, aes(x = model, y = q50)) +
-    theme_bw() +
-    ylab("Estimated number of individuals") +
-    xlab("Model") +
-    geom_pointrange(aes(ymin = q2.5, ymax = q97.5), size = 1)
+  theme_bw() +
+  ylab("Estimated number of individuals") +
+  xlab("Model") +
+  geom_pointrange(aes(ymin = q2.5, ymax = q97.5), size = 1)
 ```
 
 ![Results of three models](./figure/present_results-1.png)
@@ -173,95 +173,125 @@ clusterExport(cl = cs, varlist = c("SCR0pois", "SCR0binom.cl", "scrUN"))
 ```{r}
 
 if (file.exists("progress.txt")) {
-    file.remove("progress.txt")
+  file.remove("progress.txt")
 }
 sim <- parLapplyLB(cl = cs, X = 1:30, fun = function(x) {
-# sim <- lapply(X = 1, FUN = function(x) {
-#     pb <- txtProgressBar(min = 0, max = 30, width = 30, style = 3)
-#     setTxtProgressBar(pb = pb, value = x)
-    
-    write(x, file = "progress.txt", append = TRUE, sep = "\n") #logging
-    
-    tr <- seq(15, 85, length = 10)
-    
-    # create trap grid
-    X <- expand.grid(x = tr, y = tr)
-    
-    # S
-    xlim <- c(0, 100)
-    ylim <- c(0, 100)
-    
-    # A = area of S
-    A <- (diff(xlim) * diff(ylim))/1e4
-    
-    mu <- 500
-    # we thus treat number of individuals as a Poisson random variable
-    N <- rpois(1, mu * A)
-    
-    s <- cbind(
-        runif(N, min = xlim[1], max = xlim[2]),
-        runif(N, min = ylim[1], max = ylim[2])
-    )
-    
-    # generate encounter histories under the Poisson model
-    sigma <- 5       # detection parameter
-    lam0 <- 0.4      # base detection
-    J <- nrow(X)     # number of traps
-    K <- 5           # number of trapping sessions
-    y <- array(NA, c(N, J, K))
-    
-    for (j in 1:J) {
-        dist <- sqrt((X[j, 1] - s[, 1])^2 + (X[j, 2] - s[, 2])^2)
-        lambda <- lam0 * exp(-dist^2/(2 * sigma^2))
-        for (k in 1:K) {
-            y[, j, k] <- rpois(N, lambda)
-        }
+  # sim <- lapply(X = 1, FUN = function(x) {
+  #     pb <- txtProgressBar(min = 0, max = 30, width = 30, style = 3)
+  #     setTxtProgressBar(pb = pb, value = x)
+  
+  write(x, file = "progress.txt", append = TRUE, sep = "\n") #logging
+  
+  tr <- seq(15, 85, length = 10)
+  
+  # create trap grid
+  X <- expand.grid(x = tr, y = tr)
+  
+  # S
+  xlim <- c(0, 100)
+  ylim <- c(0, 100)
+  
+  # A = area of S
+  A <- (diff(xlim) * diff(ylim))/1e4
+  
+  mu <- 500
+  # we thus treat number of individuals as a Poisson random variable
+  N <- rpois(1, mu * A)
+  
+  s <- cbind(
+    runif(N, min = xlim[1], max = xlim[2]),
+    runif(N, min = ylim[1], max = ylim[2])
+  )
+  
+  # generate encounter histories under the Poisson model
+  sigma <- 5       # detection parameter
+  lam0 <- 0.4      # base detection
+  J <- nrow(X)     # number of traps
+  K <- 5           # number of trapping sessions
+  y <- array(NA, c(N, J, K))
+  
+  for (j in 1:J) {
+    dist <- sqrt((X[j, 1] - s[, 1])^2 + (X[j, 2] - s[, 2])^2)
+    lambda <- lam0 * exp(-dist^2/(2 * sigma^2))
+    for (k in 1:K) {
+      y[, j, k] <- rpois(N, lambda)
     }
-    
-    ### CMR model
-    # augment data - add M-nrow(y) of "phantom" individuals
-    M <- mu * 1.5
-    # for each trap (J of them), record how many time an individual has been captured
-    bin.y <- apply(y, MARGIN = 1:2, FUN = sum)
-    augmented.y <- matrix(0, nrow = M, ncol = ncol(bin.y))
-    augmented.y[1:nrow(bin.y), ] <- bin.y
-    
-    binom.augmented.y <- augmented.y
-    binom.augmented.y[binom.augmented.y > 0] <- 1
-    
-    # find outer bounds of the trapping grid and add padding
-    padding <- 20
-    xl <- min(X$x) - padding
-    xu <- max(X$x) + padding
-    yl <- min(X$y) - padding
-    yu <- max(X$y) + padding
-    
-    start <- 5000
-    niter <- 25000
-    
-    # sum the data for each trap across all individuals where result
-    # represents number of individuals caught for given trap and session [J × K]
-    n <- apply(y, MARGIN = c(2, 3), FUN = sum)
-    
-    dimnames(n) <- list(paste("trap", 1:J, sep = ""),
-                        paste("occasion", 1:K, sep = ""))
-    
+  }
+  
+  ### CMR model
+  # augment data - add M-nrow(y) of "phantom" individuals
+  M <- mu * 1.5
+  # for each trap (J of them), record how many time an individual has been captured
+  bin.y <- apply(y, MARGIN = 1:2, FUN = sum)
+  augmented.y <- matrix(0, nrow = M, ncol = ncol(bin.y))
+  augmented.y[1:nrow(bin.y), ] <- bin.y
+  
+  binom.augmented.y <- augmented.y
+  binom.augmented.y[binom.augmented.y > 0] <- 1
+  
+  # find outer bounds of the trapping grid and add padding
+  padding <- 20
+  xl <- min(X$x) - padding
+  xu <- max(X$x) + padding
+  yl <- min(X$y) - padding
+  yu <- max(X$y) + padding
+  
+  start <- 5000
+  niter <- 25000
+  
+  # sum the data for each trap across all individuals where result
+  # represents number of individuals caught for given trap and session [J × K]
+  n <- apply(y, MARGIN = c(2, 3), FUN = sum)
+  
+  dimnames(n) <- list(paste("trap", 1:J, sep = ""),
+                      paste("occasion", 1:K, sep = ""))
+  
+  # try fitting a model three times
+  
+  pass.pois <- 3
+  while (pass.pois > 0) {
     pois <- tryCatch(mark.pois.N <- SCR0pois(y = augmented.y, X = X, M = M, xl = xl, 
                                              xu = xu, yl = yl, yu = yu, delta = c(1, 0.1, 2), 
                                              niter = niter), 
                      error = function(e) e)
     
+    if (any(class(pois) %in% "error")) {
+      pass.pois <- pass.pois - 1
+    } else {
+      break
+    }
+    
+  }
+  
+  pass.binom <- 3
+  while (pass.binom > 0) {
     binom <- tryCatch(SCR0binom.cl(y = binom.augmented.y, X = X, M = M, xl = xl,
                                    xu = xu, yl = yl, yu = yu, K = K, 
                                    delta = c(1, 0.1, 2), niter = niter),
                       error = function(e) e)
     
+    if (any(class(binom) %in% "error")) {
+      pass.binom <- pass.binom - 1
+    } else {
+      break
+    }
+  } 
+  
+  pass.unmarked <- 3
+  while (pass.unmarked > 0) {
     unmarked <- tryCatch(scrUN(n = n, X = X, M = M, niter = niter, xlims = xlim, ylims = ylim,
                                inits = list(lam0 = 0.1, sigma = rnorm(1, mean = 5, sd = 0.1)), updateY = FALSE,
                                tune = c(0.004, 0.09, 0.35)),
                          error = function(e) e)
     
-    return(list(pois = pois, binom = binom, unmarked = unmarked))
+    if (any(class(unmarked) %in% "error")) {
+      pass.unmarked <- pass.unmarked - 1
+    } else {
+      break
+    }
+  }
+  
+  return(list(pois = pois, binom = binom, unmarked = unmarked))
 })
 ```
 
@@ -270,22 +300,27 @@ sim <- parLapplyLB(cl = cs, X = 1:30, fun = function(x) {
 # This function will extract N from summary() of MCMC chains
 # for each simulation run.
 getN <- function(x, mdl, start) {
-    # x is a list of simulation runs
-    # mdl is character vector either "pois", "binom" or "unmarked"
-    # get individual models
-    ind <- lapply(x, "[[", mdl) # extract pois model diagnostics
-    if (mdl == "unmarked") {
-        ind <- lapply(ind, "[[", "sims")
-    }
-    ind <- data.frame(model = mdl, 
-                      do.call("rbind", lapply(ind, FUN = function(y) {
-                          win <- summary(window(mcmc(y), start = start))
-                          win$quantiles["N", ]
-                      })),
-                      run = 1:length(ind))
-    ind
+  # x is a list of simulation runs
+  # mdl is character vector either "pois", "binom" or "unmarked"
+  # get individual models
+  ind <- lapply(x, "[[", mdl) # extract pois model diagnostics
+  if (mdl == "unmarked") {
+    ind <- lapply(ind, "[[", "sims")
+  }
+  ind <- data.frame(model = mdl, 
+                    do.call("rbind", lapply(ind, FUN = function(y) {
+                      win <- summary(window(mcmc(y), start = start))
+                      win$quantiles["N", ]
+                    })),
+                    run = 1:length(ind))
+  ind
 }
 
 getN(x = sim, mdl = "binom", start = start)
+```
+
+```{r}
+# probably something like
+sim.result <- lapply("getN", sim)
 ```
 
