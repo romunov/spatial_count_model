@@ -1,0 +1,132 @@
+---
+title: "Simulation of bias in SCR"
+author: "Jose Jimenez"
+date: "24. avgust 2015"
+output: html_document
+---
+
+This code was sent to the [spatial capture-recapture google group list](https://groups.google.com/forum/#!topic/spatialcapturerecapture/mBHLnuFcQv0) by Jose Jimenez.
+
+```{r}
+library(scrbook)
+
+simSCR02<-function (N = 100, K = 20, discard0 = TRUE, array3d = FALSE,
+                    rnd = 2013)
+{
+  set.seed(rnd)
+  traplocs <- cbind(sort(rep(1:10, 10)), rep(1:10, 10))
+  Dmat <- e2dist(traplocs, traplocs)
+  ntraps <- nrow(traplocs)
+  delta <- 2
+  Xl <- min(traplocs[, 1] - delta)
+  Xu <- max(traplocs[, 1] + delta)
+  Yl <- min(traplocs[, 2] - delta)
+  Yu <- max(traplocs[, 2] + delta)
+  plot(traplocs, pch=3, col="blue", xlim=c(Xl,Xu), ylim=c(Yl,Yu))
+  sx <- runif(N, Xl, Xu)
+  sy <- runif(N, Yl, Yu)
+  S <- cbind(sx, sy)
+  points(S, pch=16, col="red")
+  D <- e2dist(S, traplocs)
+  alpha0 <- -2.5
+  sigma <- 0.5
+  alpha1 <- 1/(2 * sigma * sigma)
+  probcap <- plogis(alpha0) * exp(-alpha1 * D * D)
+  Y <- matrix(NA, nrow = N, ncol = ntraps)
+  for (i in 1:nrow(Y)) {
+    Y[i, ] <- rbinom(ntraps, K, probcap[i, ])
+  }
+  if (discard0) {
+    totalcaps <- apply(Y, 1, sum)
+    Y <- Y[totalcaps > 0, ]
+  }
+  dimnames(Y) <- list(1:nrow(Y), paste("trap", 1:ncol(Y), sep = ""))
+  if (array3d) {
+    Y <- array(NA, dim = c(N, K, ntraps))
+    for (i in 1:nrow(Y)) {
+      for (j in 1:ntraps) {
+        Y[i, 1:K, j] <- rbinom(K, 1, probcap[i, j])
+      }
+    }
+    if (discard0) {
+      Y2d <- apply(Y, c(1, 3), sum)
+      ncaps <- apply(Y2d, 1, sum)
+      Y <- Y[ncaps > 0, , ]
+    }
+  }
+  list(Y = Y, traplocs = traplocs, xlim = c(Xl, Xu), ylim = c(Yl, Yu), N = N, 
+       alpha0 = alpha0, alpha1 = alpha1, sigma = sigma, K = K, S=S)
+}
+```
+
+```{r}
+## Data simulation
+data <- simSCR02(N=50, K=15, array3d = FALSE, discard0=TRUE, rnd=2013)
+S<-data$S
+y <- data$Y
+nind <- nrow(y)
+X <- data$traplocs
+K <- data$K
+J <- nrow(X)
+xlim <- data$xlim
+ylim <- data$ylim
+area <- (max(xlim) - min(xlim)) * (max(ylim) - min(ylim))
+## Data augmentation
+M <- 200
+y <- rbind(y,matrix(0,nrow=M-nind,ncol=ncol(y)))
+z <- c(rep(1,nind),rep(0,M-nind))
+## Init for s
+sst <- cbind(runif(M,xlim[1],xlim[2]),runif(M,ylim[1],ylim[2]))
+for(i in 1:nind){
+  sst[i,1] <- mean( X[y[i,]>0,1] )
+  sst[i,2] <- mean( X[y[i,]>0,2] )
+}
+
+library(nimble)
+## define the model
+code <- nimbleCode({
+  alpha0 ~ dnorm(0,.1)
+  logit(p0) <- alpha0
+  alpha1 ~ dnorm(0,.1)
+  sigma <- sqrt(1/(2*alpha1))
+  psi ~ dunif(0,1)
+  for(i in 1:M){
+    z[i] ~ dbin(size = 1, psi)
+    s[i,1] ~ dunif(xlim[1],xlim[2])
+    s[i,2] ~ dunif(ylim[1],ylim[2])
+    for(j in 1:J){
+      d[i,j] <- pow(pow(s[i,1]-X[j,1],2) + pow(s[i,2]-X[j,2],2),0.5)
+      y[i,j] ~ dbin(p[i,j],K)
+      p[i,j] <- z[i]*p0*exp(- alpha1*d[i,j]*d[i,j])
+    }
+  }
+  N <- sum(z[1:M])
+  D <- N/area
+})
+
+constants <- list(M = M, K=K, J=J, area=area)
+data <- list (y=y, X=X, xlim=xlim, ylim=ylim)
+inits <- list (alpha0=0.5, alpha1=1, s=sst, z=z, N=10, D=0.5)
+Rmodel <- nimbleModel(code=code, constants=constants, data=data, inits=inits)
+mcmcspec <- configureMCMC(Rmodel, print=TRUE)
+mcmcspec$addSampler(target = c('N', 'D', 'sigma'), type = 'RW_block',
+                    control = list(adaptInterval = 100))
+mcmcspec$addMonitors(c('N', 'D', 'sigma'))
+pumpMCMC <- buildMCMC(mcmcspec)
+Cmodel <- compileNimble(Rmodel)
+CpumpMCMC <- compileNimble(pumpMCMC, project = Rmodel)
+## execute MCMC algorithm and extract samples
+CpumpMCMC$run(10000)
+samples1 <- as.matrix(CpumpMCMC$mvSamples)
+CpumpMCMC$run(10000)
+samples2 <- as.matrix(CpumpMCMC$mvSamples)
+CpumpMCMC$run(10000)
+samples3 <- as.matrix(CpumpMCMC$mvSamples)
+## Output:
+library(coda)
+res<-mcmc.list(mcmc(samples1), mcmc(samples2), mcmc(samples3))
+summary(res[, c('N','D', 'alpha0','alpha1','sigma','psi')], dig=2)
+plot(res[, c('N','D','sigma','psi')], dig=2)
+
+```
+
