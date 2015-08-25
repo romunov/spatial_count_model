@@ -10,7 +10,7 @@ This code was sent to the [spatial capture-recapture google group list](https://
 ```{r}
 library(scrbook)
 
-simSCR02<-function (N = 100, K = 20, discard0 = TRUE, array3d = FALSE,
+simSCR02<-function (N = 100, K = 20, discard0 = TRUE, array3d = TRUE,
                     rnd = 2013)
 {
   set.seed(rnd)
@@ -127,6 +127,5 @@ library(coda)
 res<-mcmc.list(mcmc(samples1), mcmc(samples2), mcmc(samples3))
 summary(res[, c('N','D', 'alpha0','alpha1','sigma','psi')], dig=2)
 plot(res[, c('N','D','sigma','psi')], dig=2)
-
 ```
 

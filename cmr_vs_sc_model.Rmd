@@ -165,9 +165,76 @@ library(scrbook)
 library(coda)
 library(ggplot2)
 library(parallel)
+library(nimble)
 
 cs <- makeCluster(3)
-clusterExport(cl = cs, varlist = c("SCR0pois", "SCR0binom.cl", "scrUN"))
+clusterExport(cl = cs, varlist = c("SCR0pois", "SCR0binom.cl", "scrUN", "e2dist"))
+```
+
+```{r joses_nimble_simulation}
+jose.binom <- function(S, y, X, K, J, lims, niter) {
+  # S = individual centroids
+  # y = matrix [nind × ntraps]
+  # X = trap locations matrix [nind × 2]
+  # K = number of sessions
+  # J = number of traps
+  # lims = named list of vectors i.e. list(c(xlim = x, ylim = y))
+  
+  nind <- nrow(y)
+  xlim <- lims$xlim
+  ylim <- lims$ylim
+  
+  # xlim <- data$xlim
+  # ylim <- data$ylim
+  
+  area <- (max(xlim) - min(xlim)) * (max(ylim) - min(ylim))
+  ## Data augmentation
+  M <- 200
+  y <- rbind(y,matrix(0,nrow=M-nind,ncol=ncol(y)))
+  z <- c(rep(1,nind),rep(0,M-nind))
+  ## Init for s
+  sst <- cbind(runif(M,xlim[1],xlim[2]),runif(M,ylim[1],ylim[2]))
+  for(i in 1:nind){
+    sst[i,1] <- mean( X[y[i,]>0,1] )
+    sst[i,2] <- mean( X[y[i,]>0,2] )
+  }
+  
+  code <- nimbleCode({
+    alpha0 ~ dnorm(0,.1)
+    logit(p0) <- alpha0
+    alpha1 ~ dnorm(0,.1)
+    sigma <- sqrt(1/(2*alpha1))
+    psi ~ dunif(0,1)
+    for(i in 1:M){
+      z[i] ~ dbin(size = 1, psi)
+      s[i,1] ~ dunif(xlim[1],xlim[2])
+      s[i,2] ~ dunif(ylim[1],ylim[2])
+      for(j in 1:J){
+        d[i,j] <- pow(pow(s[i,1]-X[j,1],2) + pow(s[i,2]-X[j,2],2),0.5)
+        y[i,j] ~ dbin(p[i,j],K)
+        p[i,j] <- z[i]*p0*exp(- alpha1*d[i,j]*d[i,j])
+      }
+    }
+    N <- sum(z[1:M])
+    D <- N/area
+  })
+  
+  # Jose's nimble version
+  constants <- list(M = M, K=K, J=J, area=area)
+  data <- list (y=y, X=X, xlim=xlim, ylim=ylim)
+  inits <- list (alpha0=0.5, alpha1=1, s=sst, z=z, N=10, D=0.5)
+  Rmodel <- nimbleModel(code=code, constants=constants, data=data, inits=inits)
+  mcmcspec <- configureMCMC(Rmodel, print=TRUE)
+  mcmcspec$addSampler(target = c('N', 'D', 'sigma'), type = 'RW_block',
+                      control = list(adaptInterval = 100))
+  mcmcspec$addMonitors(c('N', 'D', 'sigma'))
+  pumpMCMC <- buildMCMC(mcmcspec)
+  Cmodel <- compileNimble(Rmodel)
+  CpumpMCMC <- compileNimble(pumpMCMC, project = Rmodel)
+  ## execute MCMC algorithm and extract samples
+  CpumpMCMC$run(niter)
+  
+}
 ```
 
 ```{r parallel_simulation}
@@ -208,26 +275,40 @@ sim <- parLapplyLB(cl = cs, X = 1:6, fun = function(x) {
   lam0 <- 0.4      # base detection
   J <- nrow(X)     # number of traps
   K <- 5           # number of trapping sessions
-  y <- array(NA, c(N, J, K))
   
-  for (j in 1:J) {
-    dist <- sqrt((X[j, 1] - s[, 1])^2 + (X[j, 2] - s[, 2])^2)
-    lambda <- lam0 * exp(-dist^2/(2 * sigma^2))
-    for (k in 1:K) {
-      y[, j, k] <- rpois(N, lambda)
-    }
+  #   y <- array(NA, c(N, J, K))
+  #   for (j in 1:J) {
+  #     dist <- sqrt((X[j, 1] - s[, 1])^2 + (X[j, 2] - s[, 2])^2)
+  #     lambda <- lam0 * exp(-dist^2/(2 * sigma^2))
+  #     for (k in 1:K) {
+  #       y[, j, k] <- rpois(N, lambda)
+  #     }
+  #   }
+  
+  alpha0 <- -2.5
+  alpha1 <- 1/(2 * sigma * sigma)
+  D <- e2dist(s, X)
+  probcap <- plogis(alpha0) * exp(-alpha1 * D * D)
+  
+  y <- matrix(NA, nrow = N, ncol = J)
+  for (i in 1:nrow(y)) {
+    y[i, ] <- rbinom(J, K, probcap[i, ])
   }
   
-  ### CMR model
-  # augment data - add 50% of "phantom" individuals
-  M <- mu * 1.5
-  # for each trap (J of them), record how many times an individual has been captured
-  bin.y <- apply(y, MARGIN = 1:2, FUN = sum)
-  augmented.y <- matrix(0, nrow = M, ncol = ncol(bin.y))
-  augmented.y[1:nrow(bin.y), ] <- bin.y
+  # discard undetected individuals
+  rs <- rowSums(y)
+  y <- y[rs != 0, ]
   
-  binom.augmented.y <- augmented.y
-  binom.augmented.y[binom.augmented.y > 0] <- 1
+  ### CMR model
+  # augment data - add 200 of "phantom" individuals
+  M <- 700
+  # for each trap (J of them), record how many times an individual has been captured
+  # bin.y <- apply(y, MARGIN = 1:2, FUN = sum)
+  augmented.y <- matrix(0, nrow = M, ncol = ncol(y))
+  augmented.y[1:nrow(y), ] <- y
+  
+  # binom.augmented.y <- augmented.y
+  # binom.augmented.y[binom.augmented.y > 0] <- 1
   
   # find outer bounds of the trapping grid and add padding
   # Jose J G-H pointed out that padding <- 20 may too much since padding
@@ -239,15 +320,14 @@ sim <- parLapplyLB(cl = cs, X = 1:6, fun = function(x) {
   yl <- min(X$y) - padding
   yu <- max(X$y) + padding
   
-  start <- 3000
   niter <- 10000
   
   # sum the data for each trap across all individuals where result
   # represents number of individuals caught for given trap and session [J × K]
-  n <- apply(y, MARGIN = c(2, 3), FUN = sum)
+  # n <- apply(y, MARGIN = c(2, 3), FUN = sum)
   
-  dimnames(n) <- list(paste("trap", 1:J, sep = ""),
-                      paste("occasion", 1:K, sep = ""))
+  # dimnames(n) <- list(paste("trap", 1:J, sep = ""),
+  # paste("occasion", 1:K, sep = ""))
   
   # try fitting a model three times
   
@@ -268,7 +348,7 @@ sim <- parLapplyLB(cl = cs, X = 1:6, fun = function(x) {
   
   pass.binom <- 3
   while (pass.binom > 0) {
-    binom <- tryCatch(SCR0binom.cl(y = binom.augmented.y, X = X, M = M, xl = xl,
+    binom <- tryCatch(SCR0binom.cl(y = augmented.y, X = X, M = M, xl = xl,
                                    xu = xu, yl = yl, yu = yu, K = K, 
                                    delta = c(1, 0.1, 2), niter = niter),
                       error = function(e) e)
@@ -294,7 +374,9 @@ sim <- parLapplyLB(cl = cs, X = 1:6, fun = function(x) {
     }
   }
   
-  # this logs runs
+
+  
+    # this logs runs
   timediff <- Sys.time() - start.time
   unit <- attr(timediff, "units")
   log.string <- sprintf("Iteration %d lasted %3.1f %s", x, timediff, unit)
