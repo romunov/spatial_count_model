@@ -301,9 +301,10 @@ sim <- parLapplyLB(cl = cs, X = 1:6, fun = function(x) {
   write(log.string, file = "progress.txt", append = TRUE, sep = "\n")
   
   # write simulations to a file in case things crash
-  save(pois, binom, unmarked, file = paste("sim_", x, ".RData", sep = ""))
+  save(pois, binom, unmarked, x, N, sigma, lam0, J, K, A, file = paste("sim_", x, ".RData", sep = ""))
   
-  return(list(pois = pois, binom = binom, unmarked = unmarked, run = x))
+  return(list(pois = pois, binom = binom, unmarked = unmarked, run = x, N = N,
+              sigma = sigma, lambda = lam0, J = J, K = K, A = A))
 })
 ```
 
@@ -311,9 +312,12 @@ sim <- parLapplyLB(cl = cs, X = 1:6, fun = function(x) {
 ```{r paranalysis}
 # This function will extract N from summary() of MCMC chains
 # for each simulation run.
-getN <- function(x, mdl, start) {
+getN <- function(x, mdl, start, stat = "N") {
   # x is a list of simulation runs
   # mdl is character vector either "pois", "binom" or "unmarked"
+  # start is the burnin length
+  # stat is for which parameter to extract statistic(s)
+  
   # get individual models
   ind <- lapply(x, "[[", mdl) # extract pois model diagnostics
   if (mdl == "unmarked") {
@@ -327,12 +331,24 @@ getN <- function(x, mdl, start) {
                     run = 1:length(ind))
   ind
 }
-
-getN(x = sim, mdl = "binom", start = start)
 ```
 
-```{r}
-# probably something like
-sim.result <- lapply("getN", sim)
+```{r extract_results}
+load("sim.RData")
+spois <- getN(sim, mdl = "pois", start = 3000)
+sbinom <- getN(sim, mdl = "binom", start = 3000)
+sunmarked <- getN(sim, mdl = "unmarked", start = 3000)
 ```
+
+```{r draw results}
+fs <- rbind(spois, sbinom, sunmarked)
+fs
+
+ggplot(fs, aes(x = as.factor(run), y = X50.)) +
+  theme_bw() +
+  geom_pointrange(aes(ymin = X2.5., ymax = X97.5.)) +
+  facet_grid(model ~ ., scales = "free_y")
+```
+
+
 
