@@ -300,6 +300,9 @@ sim <- parLapplyLB(cl = cs, X = 1:6, fun = function(x) {
   log.string <- sprintf("Iteration %d lasted %3.1f %s", x, timediff, unit)
   write(log.string, file = "progress.txt", append = TRUE, sep = "\n")
   
+  # write simulations to a file in case things crash
+  save(pois, binom, unmarked, file = paste("sim_", x, ".RData", sep = ""))
+  
   return(list(pois = pois, binom = binom, unmarked = unmarked, run = x))
 })
 ```
