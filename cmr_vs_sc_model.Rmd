@@ -272,17 +272,19 @@ sim <- parLapplyLB(cl = cs, X = 1:6, fun = function(x) {
   
   # generate encounter histories under the Poisson model
   sigma <- 5       # detection parameter
-  lam0 <- 0.4      # base detection
+  lam0 <- 0.4      # base detection for poisson model
   J <- nrow(X)     # number of traps
   K <- 5           # number of trapping sessions
+  p0 <- 0.8        # parameter for binomial model
   
-  y <- array(NA, c(N, J, K))
+  y <- array(0, c(N, J, K))
   for (j in 1:J) {
     dist <- sqrt((X[j, 1] - s[, 1])^2 + (X[j, 2] - s[, 2])^2)
-    lambda <- lam0 * exp(-dist^2/(2 * sigma^2))
+    lambda <- lam0 * exp(-dist^2/(2 * sigma^2)) # enable for poisson model
+    # p <- p0 * exp(-dist^2/(2*sigma^2)) # enable for binomial model
     for (k in 1:K) {
       y[, j, k] <- rpois(N, lambda)
-      #y[,j,k] <- rpois(N, p)
+      # y[,j,k] <- rbinom(N, 1, p) 
     }
   }
   
@@ -292,8 +294,9 @@ sim <- parLapplyLB(cl = cs, X = 1:6, fun = function(x) {
   M <- 700
   # for each trap (J of them), record how many times an individual has been captured
   bin.y <- apply(y, MARGIN = 1:2, FUN = sum)
+  bin.y <- bin.y[rowSums(bin.y) != 0, ] # remove non-captured individuals
   augmented.y <- matrix(0, nrow = M, ncol = ncol(y))
-  augmented.y[1:nrow(y), ] <- y
+  augmented.y[1:nrow(bin.y), ] <- bin.y
   
   # binom.augmented.y <- augmented.y
   # binom.augmented.y[binom.augmented.y > 0] <- 1
@@ -308,7 +311,7 @@ sim <- parLapplyLB(cl = cs, X = 1:6, fun = function(x) {
   yl <- min(X$y) - padding
   yu <- max(X$y) + padding
   
-  niter <- 10000
+  niter <- 5000
   
   # sum the data for each trap across all individuals where result
   # represents number of individuals caught for given trap and session [J × K]
@@ -334,7 +337,7 @@ sim <- parLapplyLB(cl = cs, X = 1:6, fun = function(x) {
     
   }
   
-  pass.binom <- 3
+  pass.binom <- 10
   while (pass.binom > 0) {
     binom <- tryCatch(SCR0binom.cl(y = augmented.y, X = X, M = M, xl = xl,
                                    xu = xu, yl = yl, yu = yu, K = K, 
@@ -350,7 +353,7 @@ sim <- parLapplyLB(cl = cs, X = 1:6, fun = function(x) {
   
   pass.unmarked <- 3
   while (pass.unmarked > 0) {
-    unmarked <- tryCatch(scrUN(n = augmented.y, X = X, M = M, niter = niter, xlims = xlim, ylims = ylim,
+    unmarked <- tryCatch(scrUN(n = n, X = X, M = M, niter = niter, xlims = xlim, ylims = ylim,
                                inits = list(lam0 = 0.1, sigma = rnorm(1, mean = 5, sd = 0.1)), updateY = FALSE,
                                tune = c(0.004, 0.09, 0.35)),
                          error = function(e) e)
