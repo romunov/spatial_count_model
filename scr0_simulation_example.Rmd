@@ -12,8 +12,8 @@ library(scrbook)
 
 ```{r}
 tr <- seq(15, 85, length = 10)
-X <- cbind(rep(tr, each = length(tr)),
-           rep(tr, times = length(tr)))
+X <- cbind(x = rep(tr, each = length(tr)),
+           y = rep(tr, times = length(tr)))
 
 set.seed(10)
 
@@ -22,10 +22,10 @@ ylim <- c(0, 100)
 
 A <- (xlim[2] - xlim[1]) * (ylim[2] - ylim[1])/1e4
 
-mu <- 50
+mu <- 150
 N <- rpois(1, mu * A)
 
-s <- cbind(runif(N, xlim[1], xlim[2]), runif(N, ylim[1], ylim[2]))
+s <- data.frame(x = runif(N, xlim[1], xlim[2]), y = runif(N, ylim[1], ylim[2]))
 
 sigma <- 5
 lam0 <- 0.4
@@ -34,13 +34,37 @@ K <- 5
 y <- array(NA, c(N, J, K))
 
 for (j in 1:J) {
-    dist <- sqrt((X[j, 1] - s[, 1])^2 + (X[j, 2] - s[, 2])^2)
-    lambda <- lam0 * exp(-dist^2/(2 * sigma^2))
-    for (k in 1:K) {
-        y[, j, k] <- rpois(N, lambda)
-    }
+  dist <- sqrt((X[j, 1] - s[, 1])^2 + (X[j, 2] - s[, 2])^2)
+  lambda <- lam0 * exp(-dist^2/(2 * sigma^2))
+  for (k in 1:K) {
+    y[, j, k] <- rpois(N, lambda)
+  }
 }
+
+padding <- 5
+xl <- min(X[, "x"]) - padding
+xu <- max(X[, "x"]) + padding
+yl <- min(X[, "y"]) - padding
+yu <- max(X[, "y"]) + padding
 ```
+
+### Poisson encounter model
+This model should have little or no bias.
+```{r}
+M <- 300
+niter <- 20000
+bin.y <- apply(y, MARGIN = 1:2, FUN = sum)
+bin.y <- bin.y[rowSums(bin.y) != 0, ] # remove non-captured individuals
+augmented.y <- matrix(0, nrow = M, ncol = ncol(y))
+augmented.y[1:nrow(bin.y), ] <- bin.y
+
+pois <- tryCatch(SCR0pois(y = augmented.y, X = X, M = M, xl = xl, 
+                          xu = xu, yl = yl, yu = yu, delta = c(1, 0.1, 2), 
+                          niter = niter), 
+                 error = function(e) e)
+
+```
+
 
 ### Unmarked individuals (spatial count)
 ```{r}
@@ -57,11 +81,6 @@ um.N <- scrUN(n = n, X = X, M = 300, niter = 25000, xlims = xlim, ylims = ylim,
 ### SCR model (binomial encounter process)
 ```{r}
 M <- 80
-padding <- 20
-xl <- min(X[, 1]) - padding
-xu <- max(X[, 1]) + padding
-yl <- min(X[, 2]) - padding
-yu <- max(X[, 2]) + padding
 
 plot(X, xlim = xlim + c(-padding, padding), ylim = ylim + c(-padding, padding))
 points(s, pch = "*")
@@ -71,7 +90,7 @@ aug.b <- matrix(0, nrow = M, ncol = ncol(b))
 aug.b[1:nrow(b), ] <- b
 
 scr.b <- SCR0binom.cl(y = aug.b, X = X, M = M, xl = xl,
-             xu = xu, yl = yl, yu = yu, K = K, delta = c(0.1, 0.05, 2),
-             niter = 25000)
+                      xu = xu, yl = yl, yu = yu, K = K, delta = c(0.1, 0.05, 2),
+                      niter = 25000)
 ```
 
