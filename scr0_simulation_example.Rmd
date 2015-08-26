@@ -53,15 +53,33 @@ This model should have little or no bias.
 ```{r}
 M <- 300
 niter <- 20000
+pass <- 100
+
 bin.y <- apply(y, MARGIN = 1:2, FUN = sum)
 bin.y <- bin.y[rowSums(bin.y) != 0, ] # remove non-captured individuals
 augmented.y <- matrix(0, nrow = M, ncol = ncol(y))
 augmented.y[1:nrow(bin.y), ] <- bin.y
 
-pois <- tryCatch(SCR0pois(y = augmented.y, X = X, M = M, xl = xl, 
-                          xu = xu, yl = yl, yu = yu, delta = c(1, 0.1, 2), 
-                          niter = niter), 
-                 error = function(e) e)
+
+library(parallel)
+cs <- makeCluster(3)
+clusterExport(cl = cs, varlist = c("SCR0pois"))
+
+pass.binom <- pass
+res100 <- parLapplyLB(1:100, FUN = function(x) {
+  while (pass.binom > 0) {
+    pois <- tryCatch(SCR0pois(y = augmented.y, X = X, M = M, xl = xl, 
+                              xu = xu, yl = yl, yu = yu, delta = c(1, 0.1, 2), 
+                              niter = niter), 
+                     error = function(e) e)
+    
+    if (any(class(pois) %in% "error")) {
+      pass.pois <- pass.pois - 1
+    } else {
+      break
+    }
+  }
+})
 
 ```
 
