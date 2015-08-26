@@ -180,8 +180,7 @@ paraFunction <- function(x, pass = 100, data.model = c("poisson", "binomial"),
   dimnames(n) <- list(paste("trap", 1:J, sep = ""),
                       paste("occasion", 1:K, sep = ""))
   
-  # try fitting a model three times
-  
+  # try fitting a model "pass" times
   pass.binom <- pass
   while (pass.binom > 0) {
     pois <- tryCatch(SCR0pois(y = augmented.y, X = X, M = M, xl = xl, 
@@ -194,7 +193,6 @@ paraFunction <- function(x, pass = 100, data.model = c("poisson", "binomial"),
     } else {
       break
     }
-    
   }
   
   pass.binom <- pass
