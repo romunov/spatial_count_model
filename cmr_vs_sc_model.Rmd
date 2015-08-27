@@ -182,7 +182,7 @@ paraFunction <- function(x, pass = 100, data.model = c("poisson", "binomial"),
   
   # try fitting a model "pass" times
   pass.pois <- pass
-  while (pass.binom > 0) {
+  while (pass.pois > 0) {
     pois <- tryCatch(SCR0pois(y = augmented.y, X = X, M = M, xl = xl, 
                               xu = xu, yl = yl, yu = yu, delta = c(1, 0.1, 2), 
                               niter = niter), 
@@ -242,31 +242,43 @@ if (file.exists("progress.txt")) {
   file.remove("progress.txt")
 }
 
-sim.poisson <- parLapplyLB(cl = cs, X = 1:6, fun = paraFunction, data.model = "poisson", niter = 5000)
-sim.binomial <- parLapplyLB(cl = cs, X = 1:6, fun = paraFunction, data.model = "binomial", niter = 5000)
+sim.poisson <- parLapplyLB(cl = cs, X = 1:12, fun = paraFunction, data.model = "poisson", niter = 5000)
+sim.binomial <- parLapplyLB(cl = cs, X = 1:12, fun = paraFunction, data.model = "binomial", niter = 5000)
 ```
 
-
-```{r paranalysis}
-# This function will extract N from summary() of MCMC chains
-# for each simulation run.
-getN <- function(x, mdl, start, stat = "N") {
-  # x is a list of simulation runs
-  # mdl is character vector either "pois", "binom" or "unmarked"
-  # start is the burnin length
-  # stat is for which parameter to extract statistic(s)
+```{r}
+# Each simulation run is stored in a .RData file and contains estimates of a dataset
+# using binomial, Poisson and unmarked model. Each .RData file is in turn scraped for
+# results and stored as `res`.
+res <- sapply(X = list.files(pattern = "sim_"), FUN = function(x) {
   
-  # get individual models
-  ind <- lapply(x, "[[", mdl) # extract pois model diagnostics
-  if (mdl == "unmarked") {
-    ind <- lapply(ind, "[[", "sims")
-  }
-  ind <- data.frame(model = mdl, 
-                    do.call("rbind", lapply(ind, FUN = function(y) {
-                      win <- summary(window(mcmc(y), start = start))
-                      win$quantiles["N", ]
-                    })),
-                    run = 1:length(ind))
-  ind
-}
+  load(x)
+  
+  # Try to find statistics for the model. If it fails it produces empty result.
+  b <- tryCatch(expr = summary(mcmc(binom))$quantiles["N", ], 
+                error = function(e) structure(c(NA, NA, NA, NA, NA), .Names = c("2.5%", "25%", 
+                                                                                "50%", "75%", "97.5%")))
+  p <- tryCatch(expr = summary(mcmc(pois))$quantiles["N", ],
+                error = function(e) structure(c(NA, NA, NA, NA, NA), .Names = c("2.5%", "25%", 
+                                                                                "50%", "75%", "97.5%")))
+  u <- tryCatch(expr = summary(mcmc(unmarked[[1]]))$quantiles["N", ],
+                error = function(e) structure(c(NA, NA, NA, NA, NA), .Names = c("2.5%", "25%", 
+                                                                                "50%", "75%", "97.5%")))
+  # Combine all parameters into one single data.frame.
+  res <- data.frame(rbind(binom = b, poisson = p, unmarked = u, data.model,
+                    A, J, K, lam0, N, sigma, run = x, model = c("binom", "poisson", "unmarked")))
+  res
+}, simplify = FALSE)
+
+res <- do.call("rbind", res) # merge list into a data.frame
+
+ggplot(res, aes(x = as.factor(run), y = X50., color = data.model)) +
+  theme_bw() +
+  xlab("Run") +
+  ylab("Estimated number of individuals") +
+  geom_pointrange(aes(ymin = X2.5., ymax = X97.5.)) +
+  geom_point(aes(y = N), color = "red") +
+  facet_grid(. ~ model)
 ```
+
+
