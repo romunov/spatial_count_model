@@ -181,7 +181,7 @@ paraFunction <- function(x, pass = 100, data.model = c("poisson", "binomial"),
                       paste("occasion", 1:K, sep = ""))
   
   # try fitting a model "pass" times
-  pass.binom <- pass
+  pass.pois <- pass
   while (pass.binom > 0) {
     pois <- tryCatch(SCR0pois(y = augmented.y, X = X, M = M, xl = xl, 
                               xu = xu, yl = yl, yu = yu, delta = c(1, 0.1, 2), 
