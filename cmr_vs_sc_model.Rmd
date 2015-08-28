@@ -136,7 +136,6 @@ paraFunction <- function(x, pass = 100, data.model = c("poisson", "binomial"),
   }
   
   if (data.model == "binomial") {
-    
     for (j in 1:J) {
       dist <- sqrt((X[j, 1] - s[, 1])^2 + (X[j, 2] - s[, 2])^2)
       p <- plogis(p0) * exp(-dist^2/(2*sigma^2))
