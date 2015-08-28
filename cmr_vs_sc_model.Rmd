@@ -250,10 +250,17 @@ sim.binomial <- parLapplyLB(cl = cs, X = 1:12, fun = paraFunction, data.model = 
 # Each simulation run is stored in a .RData file and contains estimates of a dataset
 # using binomial, Poisson and unmarked model. Each .RData file is in turn scraped for
 # results and stored as `res`.
-res <- sapply(X = list.files(pattern = "sim_"), FUN = function(x) {
-  
-  load(x)
-  
+# If scrapeModelResults gives warning
+#
+# Error: is.atomic(x) is not TRUE
+# In addition: Warning message:
+# In mean.default(x, na.rm = TRUE) :
+#   argument is not numeric or logical: returning NA
+#
+# which is caused by mcmc(x) because there's no data, only error
+
+scrapeModelResults <- function(f) {
+  load(f)
   # Try to find statistics for the model. If it fails it produces empty result.
   b <- tryCatch(expr = summary(mcmc(binom))$quantiles["N", ], 
                 error = function(e) structure(c(NA, NA, NA, NA, NA), .Names = c("2.5%", "25%", 
@@ -265,14 +272,17 @@ res <- sapply(X = list.files(pattern = "sim_"), FUN = function(x) {
                 error = function(e) structure(c(NA, NA, NA, NA, NA), .Names = c("2.5%", "25%", 
                                                                                 "50%", "75%", "97.5%")))
   # Combine all parameters into one single data.frame.
-  res <- data.frame(rbind(binom = b, poisson = p, unmarked = u, data.model,
-                    A, J, K, lam0, N, sigma, run = x, model = c("binom", "poisson", "unmarked")))
+  res <- data.frame(rbind(binom = b, poisson = p, unmarked = u), data.model,
+                          A, J, K, lam0, N, sigma, run = x, model = c("binom", "poisson", "unmarked"))
+  rownames(res) <- NULL
   res
-}, simplify = FALSE)
+}
 
-res <- do.call("rbind", res) # merge list into a data.frame
+mr <- sapply(X = list.files(pattern = "sim_"), FUN = scrapeModelResults, simplify = FALSE)
+mr <- do.call("rbind", mr)
 
-ggplot(res, aes(x = as.factor(run), y = X50., color = data.model)) +
+
+ggplot(mr, aes(x = as.factor(run), y = X50., color = data.model)) +
   theme_bw() +
   xlab("Run") +
   ylab("Estimated number of individuals") +
