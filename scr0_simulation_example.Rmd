@@ -11,104 +11,68 @@ library(scrbook)
 ```
 
 ```{r}
-tr <- seq(15, 85, length = 10)
-X <- cbind(x = rep(tr, each = length(tr)),
-           y = rep(tr, times = length(tr)))
+# glej stran 140
+tr <- seq(5, 25, length = 5)
 
-set.seed(10)
+# create trap grid
+X <- expand.grid(x = tr, y = tr)
 
-xlim <- c(0, 100)
-ylim <- c(0, 100)
+plot(X, xlim = c(0, 30), ylim = c(0, 30), asp = 1)
 
-A <- (xlim[2] - xlim[1]) * (ylim[2] - ylim[1])/1e4
-
-mu <- 150
-N <- rpois(1, mu * A)
-
-s <- data.frame(x = runif(N, xlim[1], xlim[2]), y = runif(N, ylim[1], ylim[2]))
-
-sigma <- 5
-lam0 <- 0.4
+# number of traps
 J <- nrow(X)
-K <- 5
-y <- array(NA, c(N, J, K))
 
+# define state space for individuals
+buffer <- 2
+xlim <- range(X[, 1]) + c(-buffer, buffer)
+ylim <- range(X[, 2]) + c(-buffer, buffer)
+
+N <- 75
+K <- 5
+
+# simulate activity centers
+S <- cbind(x = runif(N, xlim[1], xlim[2]),
+           y = runif(N, ylim[1], ylim[2]))
+
+points(S, col = "red", cex = 0.5)
+
+p0 <- -2.5
+sigma <- 3
+
+# prepare for sampling
+y <- array(0, c(N, J, K))
 for (j in 1:J) {
-  dist <- sqrt((X[j, 1] - s[, 1])^2 + (X[j, 2] - s[, 2])^2)
-  lambda <- lam0 * exp(-dist^2/(2 * sigma^2))
+  dist <- sqrt((X[j, 1] - S[, 1])^2 + (X[j, 2] - S[, 2])^2)
+  p <- plogis(p0) * exp(-dist^2/(2*sigma^2))
   for (k in 1:K) {
-    y[, j, k] <- rpois(N, lambda)
+    y[, j, k] <- rbinom(N, 1, p) 
   }
 }
 
-padding <- 5
-xl <- min(X[, "x"]) - padding
-xu <- max(X[, "x"]) + padding
-yl <- min(X[, "y"]) - padding
-yu <- max(X[, "y"]) + padding
+M <- 200
+niter <- 20000
 ```
 
-### Poisson encounter model
-This model should have little or no bias.
-```{r}
-M <- 300
-niter <- 20000
-pass <- 100
 
+### Binomial model
+```{r fit_binomial}
 bin.y <- apply(y, MARGIN = 1:2, FUN = sum)
 bin.y <- bin.y[rowSums(bin.y) != 0, ] # remove non-captured individuals
 augmented.y <- matrix(0, nrow = M, ncol = ncol(y))
 augmented.y[1:nrow(bin.y), ] <- bin.y
 
 
-library(parallel)
-cs <- makeCluster(3)
-clusterExport(cl = cs, varlist = c("SCR0pois"))
+mdl.binom <- SCR0binom.cl(y = augmented.y, X = X, M = M, xl = xlim[1],
+             xu = xlim[2], yl = ylim[1], yu = ylim[2], K = K, delta = c(0.1, 0.05, 2),
+             niter = 5000)
+```
 
-pass.binom <- pass
-res100 <- parLapplyLB(1:100, FUN = function(x) {
-  while (pass.binom > 0) {
-    pois <- tryCatch(SCR0pois(y = augmented.y, X = X, M = M, xl = xl, 
-                              xu = xu, yl = yl, yu = yu, delta = c(1, 0.1, 2), 
-                              niter = niter), 
-                     error = function(e) e)
-    
-    if (any(class(pois) %in% "error")) {
-      pass.pois <- pass.pois - 1
-    } else {
-      break
-    }
-  }
-})
-
+```{r analysis}
+mc.b <- mcmc(mdl.binom)
+plot(mc.b)
+mc.b <- window(mc.b, start = 1000)
+summary(mc.b)
 ```
 
 
-### Unmarked individuals (spatial count)
-```{r}
-n <- apply(y, c(2, 3), FUN = sum)
-dimnames(n) <- list(paste("trap", 1:J, sep = " "),
-                    paste("night", 1:K, sep = ""))
-
-um.N <- scrUN(n = n, X = X, M = 300, niter = 25000, xlims = xlim, ylims = ylim,
-              inits = list(lam0 = 0.3, sigma = rnorm(1, 5, 0.1)),
-              updateY = FALSE, tune = c(0.004, 0.09, 0.35))
-```
-
-
-### SCR model (binomial encounter process)
-```{r}
-M <- 80
-
-plot(X, xlim = xlim + c(-padding, padding), ylim = ylim + c(-padding, padding))
-points(s, pch = "*")
-
-b <- apply(y, MARGIN = 1:2, FUN = sum)
-aug.b <- matrix(0, nrow = M, ncol = ncol(b))
-aug.b[1:nrow(b), ] <- b
-
-scr.b <- SCR0binom.cl(y = aug.b, X = X, M = M, xl = xl,
-                      xu = xu, yl = yl, yu = yu, K = K, delta = c(0.1, 0.05, 2),
-                      niter = 25000)
-```
 
