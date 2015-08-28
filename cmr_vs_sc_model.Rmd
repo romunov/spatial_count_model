@@ -248,7 +248,7 @@ sim.poisson <- parLapplyLB(cl = cs, X = 1:12, fun = paraFunction, data.model = "
 sim.binomial <- parLapplyLB(cl = cs, X = 1:12, fun = paraFunction, data.model = "binomial", niter = 5000)
 ```
 
-```{r scapre_function}
+```{r scape_function}
 # Each simulation run is stored in a .RData file and contains estimates of a dataset
 # using binomial, Poisson and unmarked model. Each .RData file is in turn scraped for
 # results and stored as `res`.
@@ -290,7 +290,7 @@ levels(mr$data.model) <- c("data.model: binom", "data.model: poisson")
 levels(mr$model) <- c("est: binom", "est: poisson", "est: unmarked")
 ```
 
-```{r}
+```{r plotting}
 suppressWarnings(print(
   ggplot(mr, aes(x = as.factor(run), y = X50.)) +
   theme_bw() +
