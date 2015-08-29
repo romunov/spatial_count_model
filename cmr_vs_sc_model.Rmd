@@ -230,7 +230,7 @@ levels(mr$model) <- c("binomial", "Poisson", "unmarked")
 mr$grid.a <- mr$grid.a^2 # calculate the exact number of traps on a grid
 ```
 
-```{r plotting, echo = -2}
+```{r plotting, fig.show = "hide"}
 ggplot(mr, aes(x = as.factor(run), y = X50., color = as.factor(grid.a))) +
     theme_bw() +
     scale_color_brewer(palette = "Dark2", name = "Number of grid cells") +
@@ -241,8 +241,10 @@ ggplot(mr, aes(x = as.factor(run), y = X50., color = as.factor(grid.a))) +
     geom_pointrange(aes(ymin = X2.5., ymax = X97.5.)) +
     geom_point(aes(y = N), shape = "+") +
     facet_grid(. ~ model)
-# ggsave("mr.pdf", width = 9, height = 4)
+ggsave("mr.png", width = 9, height = 4)
 ```
+
+![simulation results](./mr.png)
 
 Points designated with a `+` are simulated population size whereas points (with 95% credible intervals) are those from the estimation procedure.
 
