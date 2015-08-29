@@ -7,235 +7,179 @@ output: html_document
 
 Estimating number of animals can be done in at least two ways. One is using capture-mark-recapture (CMR) framework, where capture histories of individuals are known. A second method is using a method termed "permanent count sites", where on, as you might have guessed it, permanent counting sites, hunters count number of bears during a specific night. Counting is done in special weather conditions and at night. This kind of data could be analyzed using spatial count model (model for unmarked individuals). I will dwell into efford required for one or the other later.
 
-Let's first have a look at how well can population size be estimated using both methods. Based on the code from Spatial capture-recapture by Royle et al. (2014) I will attempt to generate capture histories for individuals and for my next trick, use CMR methods to estimate population size when capture histories are known (Poisson, Binomial) and unknown (for unmarked individuals). In other terms, I will use only the number of bears counted at a specific counting site.
+Let's first have a look at how well can population size be estimated using both methods. Based on the code from Spatial capture-recapture by Royle et al. (2014) I will attempt to generate capture histories for individuals and for my next trick, use CMR methods to estimate population size when capture histories for individuals are known (Poisson, binomial) and unknown (unmarked individuals, see Spatially-explicit models for inference about density in unmarked populations by Chandler and Royle from 2011). In other terms, I will use only the number of animals counted at a specific counting site.
 
 ```{r parallel_setup}
 library(scrbook)
 library(coda)
 library(ggplot2)
-library(nimble)
 ```
 
-```{r joses_nimble_simulation, eval = FALSE}
-jose.binom <- function(S, y, X, K, J, lims, niter) {
-  # S = individual centroids
-  # y = matrix [nind × ntraps]
-  # X = trap locations matrix [nind × 2]
-  # K = number of sessions
-  # J = number of traps
-  # lims = named list of vectors i.e. list(c(xlim = x, ylim = y))
-  
-  nind <- nrow(y)
-  xlim <- lims$xlim
-  ylim <- lims$ylim
-  
-  # xlim <- data$xlim
-  # ylim <- data$ylim
-  
-  area <- (max(xlim) - min(xlim)) * (max(ylim) - min(ylim))
-  ## Data augmentation
-  M <- 200
-  y <- rbind(y,matrix(0,nrow=M-nind,ncol=ncol(y)))
-  z <- c(rep(1,nind),rep(0,M-nind))
-  ## Init for s
-  sst <- cbind(runif(M,xlim[1],xlim[2]),runif(M,ylim[1],ylim[2]))
-  for(i in 1:nind){
-    sst[i,1] <- mean( X[y[i,]>0,1] )
-    sst[i,2] <- mean( X[y[i,]>0,2] )
-  }
-  
-  code <- nimbleCode({
-    alpha0 ~ dnorm(0,.1)
-    logit(p0) <- alpha0
-    alpha1 ~ dnorm(0,.1)
-    sigma <- sqrt(1/(2*alpha1))
-    psi ~ dunif(0,1)
-    for(i in 1:M){
-      z[i] ~ dbin(size = 1, psi)
-      s[i,1] ~ dunif(xlim[1],xlim[2])
-      s[i,2] ~ dunif(ylim[1],ylim[2])
-      for(j in 1:J){
-        d[i,j] <- pow(pow(s[i,1]-X[j,1],2) + pow(s[i,2]-X[j,2],2),0.5)
-        y[i,j] ~ dbin(p[i,j],K)
-        p[i,j] <- z[i]*p0*exp(- alpha1*d[i,j]*d[i,j])
-      }
-    }
-    N <- sum(z[1:M])
-    D <- N/area
-  })
-  
-  # Jose's nimble version
-  constants <- list(M = M, K=K, J=J, area=area)
-  data <- list (y=y, X=X, xlim=xlim, ylim=ylim)
-  inits <- list (alpha0=0.5, alpha1=1, s=sst, z=z, N=10, D=0.5)
-  Rmodel <- nimbleModel(code=code, constants=constants, data=data, inits=inits)
-  mcmcspec <- configureMCMC(Rmodel, print=TRUE)
-  mcmcspec$addSampler(target = c('N', 'D', 'sigma'), type = 'RW_block',
-                      control = list(adaptInterval = 100))
-  mcmcspec$addMonitors(c('N', 'D', 'sigma'))
-  pumpMCMC <- buildMCMC(mcmcspec)
-  Cmodel <- compileNimble(Rmodel)
-  CpumpMCMC <- compileNimble(pumpMCMC, project = Rmodel)
-  ## execute MCMC algorithm and extract samples
-  CpumpMCMC$run(niter)
-  
-}
+### Setting the scene
+Individuals move freely around the world and have a home range centroid which is not observed. What is observed are captures of said individuals on traps, set up in a grid. Number of traps is basically the only thing we not keep constant in this simulation. Here is a figure that demonstrates the design.
+
+```{r design_plot}
+tr <- seq(5, 25, length = 5)
+X <- expand.grid(x = tr, y = tr)
+N <- 30
+buffer <- 2
+xlim <- range(X[, 1]) + c(-buffer, buffer)
+ylim <- range(X[, 2]) + c(-buffer, buffer)
+s <- cbind(x = runif(N, xlim[1], xlim[2]),
+           y = runif(N, ylim[1], ylim[2]))
+
+plot(X, xlim = c(0, 30), ylim = c(0, 30), asp = 1)
+points(s, cex = 0.5, col = "red")
+rect(xleft = xlim[1], xright = xlim[2], ybottom = ylim[1], ytop = ylim[2], lty = "dotted", border = "grey")
 ```
+
+Black circles represent traps, red circles are unobserved home range centroids and the dotted gray line around the trap array is the buffer used to generate state space (area within which individuals move). We model the probability of capture of each individual so that it depends on the distance between the centroid and the trap. See CMR book by Royle et al. for further explanation.
+
+### More technicalities
+Having successfully generated trap array, individuals and their capture history (which individual was caught at which location on what occassion), we use a hand built [Metropolis-Hastings algorithm](https://en.wikipedia.org/wiki/Metropolis%E2%80%93Hastings_algorithm) available in the `scrbook` package in functions `SCR0pois` and `SCR0binom.cl` functions to estimate model parameters of Poisson and binomial models, respectively. To estimate the number of individuals for spatial count model (unmarked), we collapse the data so that we only know how many individuals were caught at which trap on which occassion and use function `scrUN` from the aforementioned package. The results are written into intermediate files on disk to prevent data loss in case something goes wrong, collected at the end and visualized. Easy peasy. 
+
+Data was generated using the above mentioned book (page ~140), parameters were estimated with the help of Chapter 17 and 18 and I couldn't have made this without helpful comments from Andy Royle and José Jiménez through the spatialcapturerecapture google group.
 
 ```{r parafunction, eval = FALSE}
 paraFunction <- function(x, pass = 100, data.model = c("poisson", "binomial"),
-                         niter) {
-  # x is a phantom parameter (not used)
-  # pass is number of times a model is run because sometimes initial parameters produce error(s)
-  # data.model indicates which model is used to generate data
-  
-  # sim <- lapply(X = 1, FUN = function(x) {
-  #     pb <- txtProgressBar(min = 0, max = 30, width = 30, style = 3)
-  #     setTxtProgressBar(pb = pb, value = x)
-  
-  start.time <- Sys.time()
-  
-  tr <- seq(15, 85, length = 10)
-  
-  # create trap grid
-  X <- expand.grid(x = tr, y = tr)
-  
-  # S
-  xlim <- c(0, 100)
-  ylim <- c(0, 100)
-  
-  # A = area of S
-  A <- (diff(xlim) * diff(ylim))/1e4
-  
-  mu <- 500
-  # we thus treat number of individuals as a Poisson random variable
-  N <- rpois(1, mu * A)
-  
-  s <- cbind(
-    runif(N, min = xlim[1], max = xlim[2]),
-    runif(N, min = ylim[1], max = ylim[2])
-  )
-  
-  # generate encounter histories under the Poisson model
-  sigma <- 5       # detection parameter
-  lam0 <- 0.4      # base detection for poisson model
-  J <- nrow(X)     # number of traps
-  K <- 5           # number of trapping sessions
-  p0 <- 0.8        # parameter for binomial model
-  
-  y <- array(0, c(N, J, K))
-  
-  if (data.model == "poisson") {
-    for (j in 1:J) {
-      dist <- sqrt((X[j, 1] - s[, 1])^2 + (X[j, 2] - s[, 2])^2)
-      lambda <- lam0 * exp(-dist^2/(2 * sigma^2))
-      for (k in 1:K) {
-        y[, j, k] <- rpois(N, lambda)
-      }
-    }
-  }
-  
-  if (data.model == "binomial") {
-    for (j in 1:J) {
-      dist <- sqrt((X[j, 1] - s[, 1])^2 + (X[j, 2] - s[, 2])^2)
-      p <- plogis(p0) * exp(-dist^2/(2*sigma^2))
-      for (k in 1:K) {
-        y[, j, k] <- rbinom(N, 1, p) 
-      }
-    }
-  }
-  
-  
-  ### CMR model
-  # augment data - add 200 of "phantom" individuals
-  M <- 700
-  # for each trap (J of them), record how many times an individual has been captured
-  bin.y <- apply(y, MARGIN = 1:2, FUN = sum)
-  bin.y <- bin.y[rowSums(bin.y) != 0, ] # remove non-captured individuals
-  augmented.y <- matrix(0, nrow = M, ncol = ncol(y))
-  augmented.y[1:nrow(bin.y), ] <- bin.y
-  
-  # binom.augmented.y <- augmented.y
-  # binom.augmented.y[binom.augmented.y > 0] <- 1
-  
-  # find outer bounds of the trapping grid and add padding
-  # Jose J G-H pointed out that padding <- 20 may too much since padding
-  # is actually 15+padding. Alternatively I could simulate space-state so
-  # that xlim and ylim would include the buffer given sigma.
-  padding <- 5
-  xl <- min(X$x) - padding
-  xu <- max(X$x) + padding
-  yl <- min(X$y) - padding
-  yu <- max(X$y) + padding
-  
-  # sum the data for each trap across all individuals where result
-  # represents number of individuals caught for given trap and session [J × K]
-  n <- apply(y, MARGIN = c(2, 3), FUN = sum)
-  
-  dimnames(n) <- list(paste("trap", 1:J, sep = ""),
-                      paste("occasion", 1:K, sep = ""))
-  
-  # try fitting a model "pass" times
-  pass.pois <- pass
-  while (pass.pois > 0) {
-    pois <- tryCatch(SCR0pois(y = augmented.y, X = X, M = M, xl = xl, 
-                              xu = xu, yl = yl, yu = yu, delta = c(1, 0.1, 2), 
-                              niter = niter), 
-                     error = function(e) e)
+                         numiter, delta = c(1, 0.1, 2), grid.a, N, K, p0, sigma, lam0) {
+    # x is a phantom parameter (not used)
+    # pass is number of times a model is run because sometimes initial parameters produce error(s)
+    # data.model indicates which model is used to generate data
+    # numiter indicates how many iterations a MCMC should have
+    # grid.a is an integer designating how many traps are on one side of the square array
+    # N tells how many individuals to simulate
+    # K is the number of occassions sampling takes place on
+    # p0 is the parameter used in the binomial model
+    # lam0 is the parameter used in the Poisson model
+    # sigma is the parameter that is used in the "detection" function
     
-    if (any(class(pois) %in% "error")) {
-      pass.pois <- pass.pois - 1
-    } else {
-      break
-    }
-  }
-  
-  pass.binom <- pass
-  while (pass.binom > 0) {
-    binom <- tryCatch(SCR0binom.cl(y = augmented.y, X = X, M = M, xl = xl,
-                                   xu = xu, yl = yl, yu = yu, K = K, 
-                                   delta = c(1, 0.1, 2), niter = niter),
-                      error = function(e) e)
+    start.time <- Sys.time()
     
-    if (any(class(binom) %in% "error")) {
-      pass.binom <- pass.binom - 1
-    } else {
-      break
+    tr <- seq(5, 5 * grid.a, length = grid.a)
+    
+    # create trap grid
+    X <- expand.grid(x = tr, y = tr)
+    
+    # number of traps
+    J <- nrow(X)
+    
+    # define state space for individuals
+    buffer <- 2
+    xlim <- range(X[, 1]) + c(-buffer, buffer)
+    ylim <- range(X[, 2]) + c(-buffer, buffer)
+    
+    A <- (max(xlim) - min(xlim)) * (max(ylim) - min(ylim))
+    
+    # simulate activity centers
+    s <- cbind(x = runif(N, xlim[1], xlim[2]),
+               y = runif(N, ylim[1], ylim[2]))
+    
+    # points(S, col = "red", cex = 0.5)
+    
+    y <- array(0, c(N, J, K))
+    
+    if (data.model == "poisson") {
+        for (j in 1:J) {
+            dist <- sqrt((X[j, 1] - s[, 1])^2 + (X[j, 2] - s[, 2])^2)
+            lambda <- lam0 * exp(-dist^2/(2 * sigma^2))
+            for (k in 1:K) {
+                y[, j, k] <- rpois(N, lambda)
+            }
+        }
     }
-  } 
-  
-  pass.unmarked <- pass
-  while (pass.unmarked > 0) {
-    unmarked <- tryCatch(scrUN(n = n, X = X, M = M, niter = niter, xlims = xlim, ylims = ylim,
-                               inits = list(lam0 = 0.1, sigma = rnorm(1, mean = 5, sd = 0.1)), updateY = FALSE,
-                               tune = c(0.004, 0.09, 0.35)),
+    
+    if (data.model == "binomial") {
+        for (j in 1:J) {
+            dist <- sqrt((X[j, 1] - s[, 1])^2 + (X[j, 2] - s[, 2])^2)
+            p <- plogis(p0) * exp(-dist^2/(2*sigma^2))
+            for (k in 1:K) {
+                y[, j, k] <- rbinom(N, 1, p) 
+            }
+        }
+    }
+    
+    ### CMR model
+    # augment data - add 200 of "phantom" individuals
+    M <- N * 2
+    # for each trap (J of them), record how many times an individual has been captured
+    bin.y <- apply(y, MARGIN = 1:2, FUN = sum)
+    bin.y <- bin.y[rowSums(bin.y) != 0, ] # remove non-captured individuals
+    augmented.y <- matrix(0, nrow = M, ncol = ncol(y))
+    augmented.y[1:nrow(bin.y), ] <- bin.y
+    
+    # sum the data for each trap across all individuals where result
+    # represents number of individuals caught for given trap and session [J × K]
+    n <- apply(y, MARGIN = c(2, 3), FUN = sum)
+    
+    dimnames(n) <- list(paste("trap", 1:J, sep = ""),
+                        paste("occasion", 1:K, sep = ""))
+    
+    # try fitting a model "pass" times
+    pass.pois <- pass
+    while (pass.pois > 0) {
+        pois <- tryCatch(SCR0pois(y = augmented.y, X = X, M = M, xl = xlim[1], 
+                                  xu = xlim[2], yl = ylim[1], yu = ylim[2], delta = delta, 
+                                  niter = numiter), 
                          error = function(e) e)
-    
-    if (any(class(unmarked) %in% "error")) {
-      pass.unmarked <- pass.unmarked - 1
-    } else {
-      break
+        
+        if (any(class(pois) %in% "error")) {
+            pass.pois <- pass.pois - 1
+        } else {
+            break
+        }
     }
-  }
-  
-  # this logs runs
-  timediff <- Sys.time() - start.time
-  unit <- attr(timediff, "units")
-  log.string <- sprintf("Iteration %d lasted %3.1f %s", x, timediff, unit)
-  write(log.string, file = "progress.txt", append = TRUE, sep = "\n")
-  
-  # write simulations to a file in case things crash
-  save(pois, binom, unmarked, x, N, sigma, lam0, J, K, A, data.model, 
-       file = paste("sim_", x, "_", data.model, "_", ".RData", sep = ""))
-  
-  return(list(pois = pois, binom = binom, unmarked = unmarked, run = x, N = N,
-              sigma = sigma, lambda = lam0, J = J, K = K, A = A, data.model = data.model))
+    
+    pass.binom <- pass
+    while (pass.binom > 0) {
+        binom <- tryCatch(SCR0binom.cl(y = augmented.y, X = X, M = M, xl = xlim[1],
+                                       xu = xlim[2], yl = ylim[1], yu = ylim[2], K = K, 
+                                       delta = delta, niter = numiter),
+                          error = function(e) e)
+        
+        if (any(class(binom) %in% "error")) {
+            pass.binom <- pass.binom - 1
+        } else {
+            break
+        }
+    } 
+    
+    pass.unmarked <- pass
+    while (pass.unmarked > 0) {
+        # have twice as many iterations as for binomial and Poisson
+        unmarked <- tryCatch(scrUN(n = n, X = X, M = M, niter = numiter * 2, xlims = xlim, ylims = ylim,
+                                   inits = list(lam0 = 0.5, sigma = rnorm(1, mean = 5, sd = 3)), 
+                                   updateY = FALSE, tune = c(0.004, 0.09, 0.35)),
+                             error = function(e) e)
+        
+        if (any(class(unmarked) %in% "error")) {
+            pass.unmarked <- pass.unmarked - 1
+        } else {
+            break
+        }
+    }
+    
+    # this logs runs
+    timediff <- Sys.time() - start.time
+    unit <- attr(timediff, "units")
+    log.string <- sprintf("Iteration %d lasted %3.1f %s", x, timediff, unit)
+    write(log.string, file = "progress.txt", append = TRUE, sep = "\n")
+    
+    # write simulations to a file in case things crash
+    save(pois, binom, unmarked, x, N, sigma, lam0, J, K, A, data.model, p0, grid.a,
+         file = paste("sim_", x, "_", data.model, "_", ".RData", sep = ""))
+    
+    return(list(pois = pois, binom = binom, unmarked = unmarked, run = x, N = N, p0 = p0, grid.a = grid.a,
+                sigma = sigma, lambda = lam0, J = J, K = K, A = A, data.model = data.model))
 }
 ```
 
+Parameters for the simulations were mostly fixed (number of individuals at 150 (`N`), in five sessions (`K`) and fixed model parameters `p0` and `sigma`), the parameter that varied was the number of traps in an array (`grid.a`). I was interested if there are any effects that can be attributed to the number of available traps.
+See the simulation code for the rest of the parameters used.
+
 ```{r parallel_simulation, eval = FALSE}
 if (file.exists("progress.txt")) {
-  file.remove("progress.txt")
+    file.remove("progress.txt")
 }
 
 library(parallel)
@@ -243,68 +187,64 @@ library(parallel)
 cs <- makeCluster(3)
 clusterExport(cl = cs, varlist = c("SCR0pois", "SCR0binom.cl", "scrUN", "e2dist"))
 
-# sim.poisson <- parLapplyLB(cl = cs, X = 1:12, fun = paraFunction, data.model = "poisson", niter = 5000)
-sim.binomial <- parLapplyLB(cl = cs, X = 13:15, fun = paraFunction, data.model = "binomial", niter = 5000)
+parLapplyLB(cl = cs, X = 1:15, fun = paraFunction, data.model = "binomial", numiter = 5000,
+            N = 150, K = 5, p0 = -2.5, sigma = 3, grid.a = 5, lam0 = NA)
+
+parLapplyLB(cl = cs, X = 16:30, fun = paraFunction, data.model = "binomial", numiter = 5000,
+            N = 150, K = 5, p0 = -2.5, sigma = 3, grid.a = 7, lam0 = NA)
+
+parLapplyLB(cl = cs, X = 31:45, fun = paraFunction, data.model = "binomial", numiter = 5000,
+            N = 150, K = 5, p0 = -2.5, sigma = 3, grid.a = 10, lam0 = NA)
 ```
 
 ```{r scape_function}
 # Each simulation run is stored in a .RData file and contains estimates of a dataset
 # using binomial, Poisson and unmarked model. Each .RData file is in turn scraped for
-# results and stored as `res`.
-# If scrapeModelResults gives warning
-#
-# Error: is.atomic(x) is not TRUE
-# In addition: Warning message:
-# In mean.default(x, na.rm = TRUE) :
-#   argument is not numeric or logical: returning NA
-#
-# which is caused by mcmc(x) because there's no data, only error
+# results which are stored in a data.frame.
 
 scrapeModelResults <- function(f, start) {
-  load(f)
-  # Try to find statistics for the model. If it fails it produces empty result.
-  b <- tryCatch(expr = summary(window(mcmc(binom), start = start))$quantiles["N", ], 
-                error = function(e) structure(c(NA, NA, NA, NA, NA), .Names = c("2.5%", "25%", 
-                                                                                "50%", "75%", "97.5%")))
-  p <- tryCatch(expr = summary(window(mcmc(pois), start = start))$quantiles["N", ],
-                error = function(e) structure(c(NA, NA, NA, NA, NA), .Names = c("2.5%", "25%", 
-                                                                                "50%", "75%", "97.5%")))
-  u <- tryCatch(expr = summary(window(mcmc(unmarked[[1]]), start = start))$quantiles["N", ],
-                error = function(e) structure(c(NA, NA, NA, NA, NA), .Names = c("2.5%", "25%", 
-                                                                                "50%", "75%", "97.5%")))
-  # Combine all parameters into one single data.frame.
-  res <- data.frame(rbind(binom = b, poisson = p, unmarked = u), data.model,
-                          A, J, K, lam0, N, sigma, run = x, model = c("binom", "poisson", "unmarked"))
-  rownames(res) <- NULL
-  res
+    load(f)
+    # Try to find statistics for the model. If it fails it produces empty result.
+    b <- tryCatch(expr = summary(window(mcmc(binom), start = start))$quantiles["N", ], 
+                  error = function(e) structure(c(NA, NA, NA, NA, NA), .Names = c("2.5%", "25%", 
+                                                                                  "50%", "75%", "97.5%")))
+    p <- tryCatch(expr = summary(window(mcmc(pois), start = start))$quantiles["N", ],
+                  error = function(e) structure(c(NA, NA, NA, NA, NA), .Names = c("2.5%", "25%", 
+                                                                                  "50%", "75%", "97.5%")))
+    u <- tryCatch(expr = summary(window(mcmc(unmarked[[1]]), start = start))$quantiles["N", ],
+                  error = function(e) structure(c(NA, NA, NA, NA, NA), .Names = c("2.5%", "25%", 
+                                                                                  "50%", "75%", "97.5%")))
+    # Combine all parameters into one single data.frame.
+    res <- data.frame(rbind(binom = b, poisson = p, unmarked = u), data.model, grid.a,
+                      A, J, K, lam0, N, sigma, run = x, model = c("binom", "poisson", "unmarked"))
+    rownames(res) <- NULL
+    res
 }
 
-suppressWarnings(
-  mr <- sapply(X = list.files(pattern = "sim_"), FUN = scrapeModelResults, start = 2000, simplify = FALSE)
-)
+mr <- sapply(X = list.files(pattern = "sim_"), FUN = scrapeModelResults, start = 2000, simplify = FALSE)
 mr <- do.call("rbind", mr)
 rownames(mr) <- NULL
 
 levels(mr$data.model) <- c("data.model: binom", "data.model: poisson")
-levels(mr$model) <- c("est: binom", "est: poisson", "est: unmarked")
+levels(mr$model) <- c("binomial", "Poisson", "unmarked")
+mr$grid.a <- mr$grid.a^2 # calculate the exact number of traps on a grid
 ```
 
-```{r plotting}
-suppressWarnings(print(
-  ggplot(mr, aes(x = as.factor(run), y = X50.)) +
-  theme_bw() +
-  xlab("Run") +
-  ylab("Estimated number of individuals") +
-  geom_pointrange(aes(ymin = X2.5., ymax = X97.5.)) +
-  geom_point(aes(y = N), shape = "+") +
-  facet_grid(model ~ data.model)
-))
-# ggsave("mr.pdf", width = 8, height = 8)
+```{r plotting, echo = -2}
+ggplot(mr, aes(x = as.factor(run), y = X50., color = as.factor(grid.a))) +
+    theme_bw() +
+    scale_color_brewer(palette = "Dark2", name = "Number of grid cells") +
+    xlab("Independent simulations") +
+    ylab("Estimated number of individuals with 95% credible intervals") +
+    theme(axis.text.x = element_text(size = 5, angle = 90),
+          axis.title = element_text(size = 8), legend.position = "top") + 
+    geom_pointrange(aes(ymin = X2.5., ymax = X97.5.)) +
+    geom_point(aes(y = N), shape = "+") +
+    facet_grid(. ~ model)
+# ggsave("mr.pdf", width = 9, height = 4)
 ```
-Points designated with a `+` are true population size whereas points (with credible intervals) are those from the estimation procedure.
-I notice a few things on this plot:
 
-- Data generated by the binomial model (first column) results in estimates less often than for Poisson model (right column).
-- Binomial model has trouble fitting the data generated using Poisson (upper right) even though R tries to fit the model using different starting values 100 times.
-- Binomial and Poisson models are constantly biased downward. The bias seems too regular so I suspect something fishy is going on. The only culprit I can think of is my data generation (still).
-- Unmarked model appears to have gargantuan credible intervals (not useful for management decisions?) and most of the time exhibits downward bias.
+Points designated with a `+` are simulated population size whereas points (with 95% credible intervals) are those from the estimation procedure.
+
+Fifteen simulations were run for each array of sizes 5x5, 7x7 and 10x10. My first impression is that number of traps doesn't appear to have an effect on estimates or credible intervals. Binomial and Poisson models appear to "hit" the true value or come close to it and almost always have the true value within the credible interval. The "unmarked" model fares worse, with missing the true value more often than not. While the credible interval covers true simulated value most of the time, the intervals do not appear to be useful (i.e. for management purposes). They appear to be capped around 300, which is the size of augmented dataset.
+
