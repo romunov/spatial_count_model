@@ -8,6 +8,8 @@ output: html_document
 On page 482 of the SCR book by Royle et al (2014) lies this example:
 ```{r}
 library(scrbook)
+library(ggplot2)
+library(coda)
 ```
 
 ```{r}
@@ -27,7 +29,7 @@ buffer <- 2
 xlim <- range(X[, 1]) + c(-buffer, buffer)
 ylim <- range(X[, 2]) + c(-buffer, buffer)
 
-N <- 75
+N <- 150
 K <- 5
 
 # simulate activity centers
@@ -42,36 +44,79 @@ sigma <- 3
 # prepare for sampling
 y <- array(0, c(N, J, K))
 for (j in 1:J) {
-  dist <- sqrt((X[j, 1] - S[, 1])^2 + (X[j, 2] - S[, 2])^2)
-  p <- plogis(p0) * exp(-dist^2/(2*sigma^2))
-  for (k in 1:K) {
-    y[, j, k] <- rbinom(N, 1, p) 
-  }
+    dist <- sqrt((X[j, 1] - S[, 1])^2 + (X[j, 2] - S[, 2])^2)
+    p <- plogis(p0) * exp(-dist^2/(2*sigma^2))
+    for (k in 1:K) {
+        y[, j, k] <- rbinom(N, 1, p) 
+    }
 }
 
-M <- 200
-niter <- 20000
+M <- N * 2
+
+# prepare data to analyze using binomial model
+bin.y <- apply(y, MARGIN = 1:2, FUN = sum)
+bin.y <- bin.y[rowSums(bin.y) != 0, ] # remove non-captured individuals
+augmented.y <- matrix(0, nrow = M, ncol = ncol(y))
+augmented.y[1:nrow(bin.y), ] <- bin.y
 ```
 
 
 ### Binomial model
 ```{r fit_binomial}
-bin.y <- apply(y, MARGIN = 1:2, FUN = sum)
-bin.y <- bin.y[rowSums(bin.y) != 0, ] # remove non-captured individuals
-augmented.y <- matrix(0, nrow = M, ncol = ncol(y))
-augmented.y[1:nrow(bin.y), ] <- bin.y
+simulationFunction <- function(x, y, M, Xmat, xl, xu, yl, yu, K, delta, niter, N, J, p0, sigma) {
+    start.time <- Sys.time()
+    
+    mdl.binom <- SCR0binom.cl(y = y, X = Xmat, M = M, xl = xl,
+                              xu = xu, yl = yl, yu = yu, K = K, delta = delta,
+                              niter = niter)
+    
+    timediff <- Sys.time() - start.time
+    unit <- attr(timediff, "units")
+    log.string <- sprintf("Iteration lasted %3.1f %s", timediff, unit)
+    write(log.string, file = "progress.txt", append = TRUE, sep = "\n")
+    
+    save(mdl.binom, x, y, M, Xmat, xl, xu, yl, yu, K, delta, niter, N, J, p0, sigma,
+         file = paste("sim_binom_", x, ".RData", sep = ""))
+    mdl.binom
+}
+```
 
+```{r do_in_parallel}
+library(parallel)
 
-mdl.binom <- SCR0binom.cl(y = augmented.y, X = X, M = M, xl = xlim[1],
-             xu = xlim[2], yl = ylim[1], yu = ylim[2], K = K, delta = c(0.1, 0.05, 2),
-             niter = 5000)
+cs <- makeCluster(3)
+clusterExport(cl = cs, varlist = c("SCR0binom.cl"))
+
+parLapplyLB(cl = cs, X = 1:30, fun = simulationFunction, y = augmented.y, M = M, Xmat = X, 
+            xl = xlim[1], xu = xlim[2], yl = ylim[1], yu = ylim[2], K = K, N = N, J = J,
+            delta = c(0.1, 0.05, 2), niter = 7000)
 ```
 
 ```{r analysis}
-mc.b <- mcmc(mdl.binom)
-plot(mc.b)
-mc.b <- window(mc.b, start = 1000)
-summary(mc.b)
+scrapeModelResults <- function(m, start) {
+    load(m)
+    # Try to find statistics for the model. If it fails it produces empty result.
+    b <- tryCatch(expr = summary(window(mcmc(mdl.binom), start = start))$quantiles["N", ], 
+                  error = function(e) structure(c(NA, NA, NA, NA, NA), .Names = c("2.5%", "25%", 
+                                                                                  "50%", "75%", "97.5%")))
+    # Combine all parameters into one single data.frame.
+    res <- data.frame(rbind(b), J, K, N, M, run = x)
+    rownames(res) <- NULL
+    res
+}
+
+suppressWarnings(
+    mr <- sapply(X = list.files(pattern = "sim_"), FUN = scrapeModelResults, start = 2000, simplify = FALSE)
+)
+mr <- do.call("rbind", mr)
+rownames(mr) <- NULL
+```
+
+```{r plot_results}
+ggplot(mr, aes(x = run, y = X50.)) +
+    theme_bw() +
+    geom_pointrange(aes(ymin = X2.5., ymax = X97.5.)) +
+    geom_point(shape = "+", size = 2)
 ```
 
 
