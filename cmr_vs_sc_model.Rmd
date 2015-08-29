@@ -7,7 +7,7 @@ output: html_document
 
 Estimating number of animals can be done in at least two ways. One is using capture-mark-recapture (CMR) framework, where capture histories of individuals are known. A second method is using a method termed "permanent count sites", where on, as you might have guessed it, permanent counting sites, hunters count number of bears during a specific night. Counting is done in special weather conditions and at night. This kind of data could be analyzed using spatial count model (model for unmarked individuals). I will dwell into efford required for one or the other later.
 
-Let's first have a look at how well can population size be estimated using both methods. Based on the code from Spatial capture-recapture by Royle et al. (2014) I will attempt to generate capture histories for individuals and for my next trick, use CMR methods to estimate population size when capture histories for individuals are known (Poisson, binomial) and unknown (unmarked individuals, see Spatially-explicit models for inference about density in unmarked populations by Chandler and Royle from 2011). In other terms, I will use only the number of animals counted at a specific counting site.
+Let us first divert our attention at how well can population size be estimated using both methods. Based on the code from Spatial capture-recapture by Royle et al. (2014) I will attempt to generate capture histories for individuals and for my next trick, use CMR methods to estimate population size when capture histories for individuals are known (Poisson, binomial models) and unknown (unmarked individuals, see Spatially-explicit models for inference about density in unmarked populations by Chandler and Royle from 2011). In other terms, I will use only the number of animals counted at a specific counting site.
 
 ```{r parallel_setup}
 library(scrbook)
@@ -16,7 +16,7 @@ library(ggplot2)
 ```
 
 ### Setting the scene
-Individuals move freely around the world and have a home range centroid which is not observed. What is observed are captures of said individuals on traps, set up in a grid. Number of traps is basically the only thing we not keep constant in this simulation. Here is a figure that demonstrates the design.
+Individuals move freely around the world and have a home range centroid which is not observed. What is observed are captures of said individuals on traps, set up in a grid. Number of traps is basically the only thing we do not keep constant in this simulation. Here is a figure that demonstrates the design.
 
 ```{r design_plot}
 tr <- seq(5, 25, length = 5)
@@ -33,17 +33,17 @@ points(s, cex = 0.5, col = "red")
 rect(xleft = xlim[1], xright = xlim[2], ybottom = ylim[1], ytop = ylim[2], lty = "dotted", border = "grey")
 ```
 
-Black circles represent traps, red circles are unobserved home range centroids and the dotted gray line around the trap array is the buffer used to generate state space (area within which individuals move). We model the probability of capture of each individual so that it depends on the distance between the centroid and the trap. See CMR book by Royle et al. for further explanation.
+Black circles represent traps, red circles are unobserved home range centroids and the dotted gray line around the trap array is the buffer used to generate state space (area within which individuals move). It is assumed animals move around the centroid (I believe the assumptions is that the movement could be described with a half-normal-ish distribution? It's Sunday 1 a.m. and I'll have to verify this later.). Probability of capture of each individual is modeled so that it depends on the distance between the centroid and the trap. See CMR book by Royle et al. for further explanation.
 
 ### More technicalities
-Having successfully generated trap array, individuals and their capture history (which individual was caught at which location on what occassion), we use a hand built [Metropolis-Hastings algorithm](https://en.wikipedia.org/wiki/Metropolis%E2%80%93Hastings_algorithm) available in the `scrbook` package in functions `SCR0pois` and `SCR0binom.cl` functions to estimate model parameters of Poisson and binomial models, respectively. To estimate the number of individuals for spatial count model (unmarked), we collapse the data so that we only know how many individuals were caught at which trap on which occassion and use function `scrUN` from the aforementioned package. The results are written into intermediate files on disk to prevent data loss in case something goes wrong, collected at the end and visualized. Easy peasy. 
+Having successfully generated a trap array, individuals and their capture history (which individual was caught at which location on what occassion), we use a hand built [Metropolis-Hastings algorithm](https://en.wikipedia.org/wiki/Metropolis%E2%80%93Hastings_algorithm) available in functions of the `scrbook` package. Functions are `SCR0pois` and `SCR0binom.cl` and can estimate model parameters for Poisson and binomial models, respectively. To estimate the number of individuals for spatial count model (unmarked), we collapse the data so that we only know how many individuals were caught at which trap on which occassion and use function `scrUN` from the aforementioned package. The results are written into intermediate files on disk to prevent data loss in case something goes wrong, collected at the end and visualized. Easy peasy. 
 
-Data was generated using the above mentioned book (page ~140), parameters were estimated with the help of Chapter 17 and 18 and I couldn't have made this without helpful comments from Andy Royle and José Jiménez through the spatialcapturerecapture google group.
+Data was generated based on code in the above mentioned book (page ~140), parameters were estimated with the help of Chapter 17 and 18 and I couldn't have made this without helpful comments made by Andy Royle and José Jiménez through the spatialcapturerecapture google group.
 
 ```{r parafunction, eval = FALSE}
 paraFunction <- function(x, pass = 100, data.model = c("poisson", "binomial"),
                          numiter, delta = c(1, 0.1, 2), grid.a, N, K, p0, sigma, lam0) {
-    # x is a phantom parameter (not used)
+    # x is iteration number, more or less reduntant
     # pass is number of times a model is run because sometimes initial parameters produce error(s)
     # data.model indicates which model is used to generate data
     # numiter indicates how many iterations a MCMC should have
@@ -174,8 +174,8 @@ paraFunction <- function(x, pass = 100, data.model = c("poisson", "binomial"),
 }
 ```
 
-Parameters for the simulations were mostly fixed (number of individuals at 150 (`N`), in five sessions (`K`) and fixed model parameters `p0` and `sigma`), the parameter that varied was the number of traps in an array (`grid.a`). I was interested if there are any effects that can be attributed to the number of available traps.
-See the simulation code for the rest of the parameters used.
+Parameters for the simulations were mostly fixed (number of individuals at 150 (`N`), in five sessions (`K`) and fixed model parameters `p0` and `sigma`), the parameter that varied was the number of traps in an array (`grid.a`). I was interested if there are any effects that can be attributed to the number of available traps (density of individuals given available traps).
+See the simulation code above for the rest of the parameters used.
 
 ```{r parallel_simulation, eval = FALSE}
 if (file.exists("progress.txt")) {
@@ -246,7 +246,12 @@ ggsave("mr.png", width = 9, height = 4)
 
 ![simulation results](./mr.png)
 
-Points designated with a `+` are simulated population size whereas points (with 95% credible intervals) are those from the estimation procedure.
+Points designated with a `+` are simulated population sizes whereas points (with 95% credible intervals) are model estimates.
 
-Fifteen simulations were run for each array of sizes 5x5, 7x7 and 10x10. My first impression is that number of traps doesn't appear to have an effect on estimates or credible intervals. Binomial and Poisson models appear to "hit" the true value or come close to it and almost always have the true value within the credible interval. The "unmarked" model fares worse, with missing the true value more often than not. While the credible interval covers true simulated value most of the time, the intervals do not appear to be useful (i.e. for management purposes). They appear to be capped around 300, which is the size of augmented dataset.
+Fifteen simulations were run for each array set of sizes 5x5, 7x7 and 10x10. My first impression is that number of traps doesn't appear to have an effect on estimates or credible intervals. Binomial and Poisson models appear to "hit" the true value or come close to it and almost always have the true value within the credible interval. The "unmarked" model fares worse by missing the true value more frequntly compared to other two models. While the credible interval covers true simulated value most of the time, the intervals do not appear to be useful (i.e. for management purposes). They appear to be capped around 300, which is the size of augmented dataset.
+
+It would perhaps be worth inspecting to:
+
+  * increase M (size of augmented dataset)
+  * try more trap array designs (number of traps, layout shape)
 
